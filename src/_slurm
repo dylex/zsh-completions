@@ -1,0 +1,2118 @@
+#compdef sacct sacctmgr salloc sattach sbatch sbcast scancel scontrol sdiag seff sgather sinfo sjobexitmod sjstat smap sprio squeue sreport srun sshare sstat strigger
+# ------------------------------------------------------------------------------
+# Description
+# -----------
+#
+#  Completion script for Slurm scheduler commands (https://slurm.schedmd.com/)
+#  Based primarily on 19.05 sources but tested against 18.08.
+#
+# ------------------------------------------------------------------------------
+# Authors
+# -------
+#
+#  * Dylan Simon <https://github.com/dylex>, Flatiron Institute <https://github.com/flatironinstitute>
+#  * Documentation text from SchedMD Slurm sources and authors
+#
+# ------------------------------------------------------------------------------
+# License
+# -------
+#
+#  Z shell license (see ../LICENSE)
+#
+
+local curcontext="$curcontext" state line expl
+
+local -a caseinsensitive
+caseinsensitive=(-M 'm:{[:lower:][:upper:]}={[:upper:][:lower:]}')
+
+_slurm_regexi_values() {
+  local a l
+  echo -n '_values'
+  for a ; do
+    # XXX force lower-case, but really should be case-insensitive
+    l=${(N)a##[a-zA-Z_]#}
+    echo -n " ${(L)a:0:$l}${(q+)a:$l}"
+  done
+}
+
+_sacctmgr_list() {
+  local tag=$1 field=$2
+  local list expl
+  shift 2
+  list=(${(f)"$(_call_program $tag sacctmgr -Pn list $tag format=$field 2>/dev/null)"})
+  (( $pipestatus > 0 )) && return $pipestatus
+  _wanted $tag expl $tag compadd "$@" -a - list
+}
+
+_slurm_account() {
+  _sacctmgr_list account account "$@"
+}
+
+_slurm_cluster() {
+  _sacctmgr_list cluster cluster "$@"
+}
+
+_slurm_qos() {
+  _sacctmgr_list qos name "$@"
+}
+
+_slurm_user() {
+  _sacctmgr_list user user "$@"
+}
+
+_slurm_wckey() {
+  _sacctmgr_list wckey name "$@"
+}
+
+_slurm_reservation() {
+  _sacctmgr_list reservation "name where start=`date +%F`" "$@"
+}
+
+_slurm_federation() {
+  _sacctmgr_list federation federation "$@"
+}
+
+_scontrol_show() {
+  local tag=$1 field=$2
+  local list expl
+  shift 2
+  list=(${(f)"$(_call_program $tag scontrol -o show $tag | sed -n "s/^.*\<$field=\([^ ]*\) .*$/\1/p" 2>/dev/null)"})
+  (( $pipestatus > 0 )) && return $pipestatus
+  _wanted $tag expl $tag compadd "$@" -a - list
+}
+
+_slurm_node() {
+  _scontrol_show node NodeName "$@"
+}
+
+_slurm_partition() {
+  _scontrol_show partition PartitionName "$@"
+}
+
+_slurm_job() {
+  _scontrol_show job JobId "$@"
+}
+
+_slurm_jobname() {
+  _scontrol_show job JobName "$@"
+}
+
+_slurm_node_feature() {
+  local expl
+  _wanted feature expl feature compadd "$@" - ${(u)$(scontrol -o show nodes | sed 's/^.*\<ActiveFeatures=\([^ ]\+\) .*$/\1/;s/,/ /g;/^(null)/d')}
+}
+
+_slurm_config() {
+  local tag=$1 field=$2
+  local list expl
+  shift 2
+  list=(${(s:,:)"$(_call_program $tag scontrol show config | awk '/^'"$field"'\>/{ print $3 }')"})
+  _wanted $tag expl $tag compadd "$@" -a - list
+}
+
+_slurm_gres() {
+  _slurm_config gres GresTypes "$@"
+}
+
+_slurm_licenses() {
+  _slurm_config gres Licenses "$@"
+}
+
+
+local -a common_options
+common_options=(
+  {-A+,--account=}'[charge job to specified account]:name:_slurm_account'
+  '--acctg-freq=[accounting and profiling sampling interval]:datatype=interval:->acctg-freq'
+  {-b+,--begin=}'[defer job until HH:MM MM/DD/YY]:time: '
+  '--bb=[burst buffer specifications]:spec: '
+  '--bbf=[burst buffer specification file]:file_name:_files'
+  '--cluster-constraint=[specify a list of cluster constraints]:[!]list: '
+  {-D+,--chdir=}'[set job current working directory]:path:_directories'
+  {-M+,--clusters=,--cluster=}'[Comma separated list of clusters to issue commands to]:names|all:->clusters'
+  '--comment=[arbitrary comment]:name: '
+  '--contiguous[demand a contiguous range of nodes]'
+  {-C+,--constraint=}'[specify a list of constraints]:list:_slurm_node_feature'
+  {-S+,--core-spec=}'[count of reserved cores]:cores: '
+  '--cores-per-socket=[number of cores per socket to allocate]:C|min|*: '
+  '--cpu-freq=[requested cpu frequency (and governor)]:min[-max[:gov]]: '
+  '--cpus-per-gpu=[number of CPUs required per allocated GPU]:n: '
+  {-c+,--cpus-per-task=}'[number of cpus required per task]:ncpus: '
+  '--deadline=[remove the job if no ending possible before this deadline]:time: '
+  '--delay-boot=[delay boot for desired node features]:mins: '
+  {-d+,--dependency=}'[defer job until condition on jobid is satisfied]:type\:jobid:->dependency'
+  {-m+,--distribution=}'[distribution method for processes to nodes]:type:(block cyclic arbitrary)'
+  {-x+,--exclude=}'[exclude a specific list of hosts]:hosts:_sequence _slurm_node'
+  '--exclusive=[allocate nodes in exclusive mode when cpu consumable resource is enabled]::user|mcs:(user mcs)'
+  {-B+,--extra-node-info=}'[Affinity/Multi-core options]:sockets[\:cores[\:threads]: '
+  '--gid=[group ID to run job as (user root only)]:group_id:_groups'
+  '--gpu-bind=[task to gpu binding options]:?: '
+  '--gpu-freq=[frequency and voltage of GPUs]:?: '
+  {-G+,--gpus=}'[count of GPUs required for the job]:n: '
+  '--gpus-per-node=[number of GPUs required per allocated node]:n: '
+  '--gpus-per-socket=[number of GPUs required per allocated socket]:n: '
+  '--gpus-per-task=[number of GPUs required per spawned task]:n: '
+  '--gres=[required generic resources]:list:_sequence _slurm_gres'
+  '--gres-flags=[flags related to GRES management]:opts:(disable-binding enforce-binding)'
+  {-h,--help}'[show this help message]'
+  '--hint=[Bind tasks according to application hints]:hint:->hint'
+  {-H,--hold}'[submit job in held state]'
+  {-J+,--job-name=}'[name of job]:jobname: '
+  {-L+,--licenses=}'[required license, comma separated]:names:_slurm_licenses'
+  '--mail-type=[notify on state change]:type:->mail-type'
+  '--mail-user=[who to send email notification for job state changes]:user:_email_addresses -c'
+  '--mcs-label=[mcs label if mcs plugin mcs/group is used]:mcs: '
+  '--mem=[minimum amount of real memory]:MB: '
+  '--mem-bind=[Bind memory to locality domains]:ldom:->mem-bind'
+  '--mem-per-cpu=[maximum amount of real memory per allocated cpu required by the job.]:MB: '
+  '--mem-per-gpu=[real memory required per allocated GPU]:n: '
+  '--mincpus=[minimum number of logical processors (threads) per node]:n: '
+  '--network=[Use network performance counters]:type:(system network processor)'
+  '--nice=[decrease scheduling priority by value]::value: '
+  {-k,--no-kill}'[do not kill job on node failure]'
+  {-F+,--nodefile=}'[request a specific list of hosts]:filename:_files'
+  {-w+,--nodelist=}'[request a specific list of hosts]:hosts:_sequence _slurm_node'
+  {-N+,--nodes=}'[number of nodes on which to run]:min[-max]: '
+  {-n+,--ntasks=}'[number of tasks to run]:N: '
+  '--ntasks-per-core=[number of tasks to invoke on each core]:n: '
+  {--ntasks-per-node=,--tasks-per-node=}'[number of tasks to invoke on each node]:n: '
+  '--ntasks-per-socket=[number of tasks to invoke on each socket]:n: '
+  {-O,--overcommit}'[overcommit resources]'
+  {-s,--oversubscribe}'[oversubscribe resources with other jobs]'
+  {-p+,--partition=}'[partition requested]:partition:_slurm_partition'
+  '--power=[power management options]:flags:(level)'
+  '--priority=[set the priority of the job to value]:value: '
+  '--profile=[enable acct_gather_profile for detailed data]:value:->profile'
+  {-q,--qos=}'[quality of service]:qos:_slurm_qos'
+  {-Q,--quiet}'[quiet mode (suppress informational messages)]'
+  '--reboot[reboot compute nodes before starting job]'
+  '--reservation=[allocate resources from named reservation]:name:_slurm_reservation'
+  '--signal=[send signal when time limit within time seconds]:[B\:]num[@time]:_signals'
+  '--sockets-per-node=[number of sockets per node to allocate]:S|min|*: '
+  '--spread-job[spread job across as many nodes as possible]'
+  '--switches=[Optimum switches and max time to wait for optimum]:max-switches[@max-time-to-wait]: '
+  '--thread-spec=[count of reserved threads]:threads: '
+  '--threads-per-core=[number of threads per core to allocate]:T|min|*: '
+  {-t+,--time=}'[time limit]:minutes: '
+  '--time-min=[minimum time limit (if distinct)]:minutes: '
+  '--tmp=[minimum amount of temporary disk]:MB: '
+  '--uid=[user ID to run job as (user root only)]:user_id:_slurm_user'
+  '--use-min-nodes[if a range of node counts is given, prefer the smaller count]'
+  {-v,--verbose}'[verbose mode (multiple -v''s increase verbosity)]'
+  {-V,--version}'[output version information and exit]'
+  '--usage[display brief usage message]'
+  '--wckey=[wckey to run job under]:wckey:_slurm_wckey'
+  '1::executable:_command_names -e'
+  '*::[args...]:_normal'
+)
+
+case "$service" in
+(sacct)
+  _arguments -s -C \
+    {--accounts=,-A+}'[Use this comma separated list of accounts to select jobs to display.  By default, all accounts are selected.]:accounts:_sequence _slurm_account' \
+    {--allclusters,-L}'[Display jobs ran on all clusters. By default, only jobs ran on the cluster from where sacct is called are displayed.]' \
+    {--allocations,-X}'[Only show statistics relevant to the job allocation itself, not taking steps into consideration.]' \
+    {--allusers,-a}'[Display jobs for all users. By default, only the current user''s jobs are displayed.  If ran by user root this is the default.]' \
+    {--associations=,-x+}'[Only send data about these association id.  Default is all.]:associations: ' \
+    {--brief,-b}'[Equivalent to ''--format=jobstep,state,error''.]' \
+    {--clusters=,-M+}'[Only send data about these clusters. Use \"all\" for all clusters.]:clusters:_sequence _slurm_cluster' \
+    {--completion,-c}'[Use job completion instead of accounting data.]' \
+    '--delimiter=[ASCII characters used to separate the fields when specifying the -p or -P options. The default delimiter is a ''|''. This options is ignored if -p or -P options are not specified.]:character: ' \
+    {--duplicates,-D}'[If Slurm job ids are reset, some job numbers may appear more than once referring to different jobs.  Without this option only the most recent jobs will be displayed.]' \
+    {--endtime=,-E+}'[Select jobs eligible before this time.  If states are given with the -s option return jobs in this state before this period.]:time: ' \
+    '--federation[Report jobs from federation if a member of a one.]' \
+    {--file=,-f+}'[Read data from the specified file, rather than Slurm''s current accounting log file. (Only appliciable when running the filetxt plugin.)]:file:_files' \
+    {--format=,-o+}'[Comma separated list of fields. (use \"--helpformat\" for a list of available fields).]:fields:->sacct-format' \
+    {--gid=,--group=,-g+}'[Use this comma separated list of gids or group names to select jobs to display.  By default, all groups are selected.]:groups:_sequence _groups' \
+    {--help,-h}'[Print this description of use.]' \
+    {--helpformat,-e}'[Print a list of fields that can be specified with the ''--format'' option]' \
+    {--jobs=,-j+}'[Format is <job(.step)>. Display information about this job or comma-separated list of jobs. The default is all jobs. Adding .step will display the specific job step of that job. (A step id of ''batch'' will display the information about the batch step.)]:job(.step): ' \
+    '--local[Report information only about jobs on the local cluster.  Overrides --federation.]' \
+    {--long,-l}'[Equivalent to specifying ''--format=jobid,jobname,partition,maxvmsize,maxvmsizenode,maxvmsizetask,avevmsize,maxrss,maxrssnode,maxrsstask,averss,maxpages,maxpagesnode,maxpagestask,avepages,mincpu,mincpunode,mincputask,avecpu,ntasks,alloccpus,elapsed,state,exitcode,avecpufreq,reqcpufreqmin,reqcpufreqmax,reqcpufreqgov,consumedenergy,maxdiskread,maxdiskreadnode,maxdiskreadtask,avediskread,maxdiskwrite,maxdiskwritenode,maxdiskwritetask,avediskread,allocgres,reqgres]' \
+    '--name=[Display jobs that have any of these name(s).]:name: ' \
+    {--ncpus=,-I+}'[Return jobs which ran on this many cpus (N = min(-max))]:min(-max): ' \
+    {--nnodes=,-i+}'[Return jobs which ran on this many nodes (N = min(-max))]:min(-max): ' \
+    '--noconvert[Don''t convert units from their original type (e.g. 2048M won''t be converted to 2G).]' \
+    {--nodelist=,-N+}'[Display jobs that ran on any of these nodes, can be one or more using a ranged string.]:nodes:_sequence _slurm_node' \
+    {--noheader,-n}'[No header will be added to the beginning of output.  The default is to print a header.]' \
+    {--parsable2,-P}'[output will be ''|'' delimited without a ''|'' at the end]' \
+    {--parsable,-p}'[output will be ''|'' delimited with a ''|'' at the end]' \
+    {--partition=,-r+}'[Comma separated list of partitions to select jobs and job steps from. The default is all partitions.]:partitions:_sequence _slurm_partition' \
+    {--qos=,-q+}'[Only send data about jobs using these qos.  Default is all.]:qos:_sequence _slurm_qos' \
+    {--starttime=,-S}'[Select jobs eligible after this time.  Default is 00-00-00 of the current day, unless ''-s'' is set then the default is ''now''.]:time: ' \
+    {--state=,-s+}'[Select jobs based on their current state or the state they were in during the time period given- running (r), completed (cd), failed (f), timeout (to), resizing (rs), deadline (dl) and node_fail (nf).]:state:->job-state' \
+    {--timelimit-max=,-K+}'[Ignored by itself, but if timelimit_min is set this will be the maximum timelimit of the range.  Default is no restriction.]:timelimit: ' \
+    {--timelimit-min=,-k+}'[Only send data about jobs with this timelimit.  If used with timelimit_max this will be the minimum timelimit of the range.  Default is no restriction.]:timelimit: ' \
+    {--truncate,-T}'[Truncate time.  So if a job started before --starttime the start time would be truncated to --starttime.  The same for end time and --endtime.]' \
+    {--uid=,--user=,-u+}'[Use this comma separated list of uids or user names to select jobs to display.  By default, the running user''s uid is used.]:users:_sequence _slurm_user' \
+    '--units=[Display values in specified unit type. Takes precedence over --noconvert option.]:unit:(K M G T P)' \
+    '--usage[Display brief usage message.]' \
+    {--verbose,-v}'[Primarily for debugging purposes, report the state of various variables during processing.]' \
+    {--version,-V}'[Print version.]' \
+    {--wckeys=,-W+}'[Only send data about these wckeys.  Default is all.]:wckeys:_sequence _slurm_wckey' \
+    '--whole-hetjob=[If set to ''yes'' (or not set), then information about all the heterogeneous components will be retrieved. If set to ''no'' only the specific filtered components will be retrieved.]:yes|no:(yes no)'
+  ;;
+
+(sacctmgr)
+  local -a reply
+  local any=$'/[^\0]#\0/'
+
+  local -a opts popts
+  _regex_words option options \
+    {-h,--help}':equivalent to \"help\" command' \
+    {-i,--immediate}':commit changes immediately' \
+    {-n,--noheader}':no header will be added to the beginning of output' \
+    {-o,--oneliner}':equivalent to \"oneliner\" command' \
+    {-p,--parsable}':output will be ''|'' delimited with a ''|'' at the end' \
+    {-P,--parsable2}':output will be ''|'' delimited without a ''|'' at the end' \
+    {-Q,--quiet}':equivalent to \"quiet\" command' \
+    {-r,--readonly}':equivalent to \"readonly\" command' \
+    {-s,--associations}':equivalent to \"associations\" command' \
+    {-v,--verbose}':equivalent to \"verbose\" command' \
+    {-V,--version}':equivalent to \"version\" command'
+  opts=($reply '#')
+  # opts that can be put anywhere -- really same as $opts but it makes completion options too messsy:
+  popts=()
+
+  # XXX all should be case-insentitive:
+
+  local -A entities
+  entities=(
+    'account' 'A bank account, typically specified at job submit time using the --account= option'
+    'association' 'The entity used to group information consisting of account, cluster, partition (optional), and user'
+    'cluster' 'The ClusterName parameter in the slurm.conf configuration file, used to differentiate accounts on different machines'
+    'configuration' 'Report current system configuration'
+    'coordinator' 'A special privileged user usually an account manager or such that can add users or sub accounts to the account they are coordinator over'
+    'event' 'Events like downed or draining nodes on clusters'
+    'federation' 'A group of clusters that work together to schedule jobs'
+    'job' 'Used to modify specific fields of a job'
+    'problem' ''
+    'qo' 'Quality of Service'
+    'reservation' ''
+    'resource' 'Software resources for the system'
+    'runawayjob' 'Report current jobs that have been orphanded on the local cluster and are now runaway'
+    'stat' 'View server statistics'
+    'transaction' 'List of transactions that have occurred during a given time period'
+    'tre'  ''
+    'user' 'The login name'
+    'wckey' 'Workload Characterization Key'
+  )
+  _sacctmgr_entities() {
+    local cmd=$1 ; shift
+    local e c
+    local -a words
+    for e ; do
+      local t=${${e%% *}//\*/}
+      for c in ${=e} ; do
+	words+=("${c}:${entities[${t%s}]:-$t}:\$popts \$${cmd}_$t")
+      done
+    done
+    _regex_words $cmd $cmd \
+      $words
+  }
+
+  _sacctmgr_specs() {
+    reply=('(' $popts $'/([^\0]#~((#i)set|where))\0/' 
+      ':specs:specs:'"$(_slurm_regexi_values -S = specs "$@")"
+      ')' '#')
+  }
+
+  _sacctmgr_format() {
+    echo -n "Format:format:"
+    _slurm_regexi_values -s , format "$@"
+  }
+
+  _sacctmgr_keyword() {
+    local kw=$1
+    local re c
+    for c in ${(s::)kw} ; do
+      if [[ $c = [A-Za-z] ]] ; then
+	re+="[${(L)c}${(U)c}]"
+      else
+	re+=$c
+      fi
+    done
+    reply=("/$re"$'\0/' ":keyword:$kw:($kw)")
+  }
+
+  local -a keyword_where keyword_set
+  _sacctmgr_keyword where
+  keyword_where=($reply)
+  _sacctmgr_keyword set
+  keyword_set=($reply)
+
+  local -a assoc_specs assoc_cond assoc_rec assoc_format
+  assoc_specs=(
+    'Parent[Parent account of this account]:parent:_slurm_account'
+    'QosLevel[Specify the default Quality of Service''s that jobs are able to run at for this association]:comma separated list of qos names:_sequence _slurm_qos'
+  )
+  assoc_cond=(
+    $assoc_specs
+    {Id,Association}':AssocId:'
+    'Clusters[List the associations of the cluster(s)]:comma separated list of cluster names:_sequence _slurm_cluster'
+    {Accounts,Acct}'[List the associations of the account(s)]:comma separated list of account names:_sequence _slurm_account'
+    'Users[List the associations of the user(s)]:comma separated list of user names:_sequence _slurm_user'
+    'Partitions[List the associations of the partition(s)]:comma separated list of partition names:_sequence _slurm_partition'
+    'DefaultQOS[The default QOS this association and its children should have]:default qos:_slurm_qos'
+  )
+  assoc_rec=(
+    $assoc_specs
+    {FairShare,Shares}'[Number used in conjunction with other accounts to determine job priority]:fairshare number|parent:(parent)'
+    #'GraceTime[Specifies, in units of seconds, the preemption grace time to be extended to a job which has been selected for preemption]:preemption grace time in seconds'
+    'GrpTRESMins[The total number of TRES minutes that can possibly be used by past, present and future jobs running from this association and its children]:TRES=max TRES minutes,...'
+    'GrpTRESRunMins[Used to limit the combined total number of TRES minutes used by all jobs running with this association and its children]:TRES=max TRES run minutes,...'
+    'GrpTRES[Maximum number of TRES running jobs are able to be allocated in aggregate for this association and all associations which are children of this association]:TRES=max TRES,...'
+    'GrpJobs[Maximum number of running jobs in aggregate for this association and all associations which are children of this association]:max jobs'
+    'GrpJobsAccrue[Maximum number of pending jobs in aggregate able to accrue age priority for this association and all associations which are children of this association]:max jobs'
+    'GrpSubmitJobs[Maximum number of jobs which can be in a pending or running state at any time in aggregate for this association and all associations which are children of this association]:max jobs'
+    'GrpWall[Maximum wall clock time running jobs are able to be allocated in aggregate for this association and all associations which are children of this association]:max wall'
+    'MaxTRESMins[Maximum number of TRES minutes each job is able to use in this association]:max TRES minutes'
+    'MaxTRES[Maximum number of TRES each job is able to use in this association]:max TRES'
+    'MaxJobs[Maximum number of jobs each user is allowed to run at one time in this association]:max jobs'
+    'MaxJobsAccrue[Maximum number of pending jobs able to accrue age priority at any given time for the given association]:max jobs'
+    'MaxSubmitJobs[Maximum number of jobs which can this association can have in a pending or running state at any time]:max jobs'
+    'MaxWall[Maximum wall clock time each job is able to use in this association]:max wall'
+    'Priority:'
+  )
+  assoc_format=(
+    'Account[The name of a bank account]'
+    'Cluster[The name of a cluster]'
+    'DefaultQOS[The QOS the association will use by default if it as access to it in the QOS list]'
+    'Fairshare[Number used in conjunction with other accounts to determine job priority]'
+    'GrpTRESMins[The total number of TRES minutes that can possibly be used by past, present and future jobs running from this association and its children]'
+    'GrpTRESRunMins[Used to limit the combined total number of TRES minutes used by all jobs running with this association and its children]'
+    'GrpTRES[Maximum number of TRES running jobs are able to be allocated in aggregate for this association and all associations which are children of this association]'
+    'GrpJobs[Maximum number of running jobs in aggregate for this association and all associations which are children of this association]'
+    'GrpJobsAccrue[Maximum number of pending jobs in aggregate able to accrue age priority for this association and all associations which are children of this association]'
+    'GrpSubmitJobs[Maximum number of jobs which can be in a pending or running state at any time in aggregate for this association and all associations which are children of this association]'
+    'GrpWall[Maximum wall clock time running jobs are able to be allocated in aggregate for this association and all associations which are children of this association]'
+    'ID[The id]'
+    'LFT[Associations are kept in a hierarchy: this is the left most spot in the hierarchy]'
+    'MaxTRESMins[Maximum number of TRES minutes each job is able to use]'
+    'MaxTRES[Maximum number of TRES each job is able to use]'
+    'MaxJobs[Maximum number of jobs each user is allowed to run at one time]'
+    'MaxJobsAccrue[Maximum number of pending jobs able to accrue age priority at any given time]'
+    'MaxSubmitJobs[Maximum number of jobs pending or running state at any time]'
+    'MaxWall[Maximum wall clock time each job is able to use]'
+    'Qos[Valid QOS'' for]'
+    'ParentID[The association id of the parent]'
+    'ParentName[The account name of the parent]'
+    'Partition[The name of a partition]'
+    'Priority[What priority will be added to a job''s priority]'
+    'WithRawQOSLevel[Display QosLevel in an unevaluated raw format]'
+    'RGT[Associations are kept in a hierarchy: this is the right most spot in the hierarchy]'
+    'User[The name of a user]'
+  )
+
+  local -a account_specs account_cond
+  account_specs=(
+    'Cluster[Specific cluster to add account to]:cluster:_slurm_cluster'
+    'Description[An arbitrary string describing an account]:description'
+    {Name,Account,Acct}'[The name of a bank account]:name:_slurm_account'
+    'Organization[Organization to which the account belongs]:org'
+  )
+  account_cond=(
+    $account_specs
+    $assoc_cond
+  )
+  local -a list_accounts add_account delete_accounts modify_accounts
+  _sacctmgr_specs \
+    $account_cond \
+    'WithAssoc[Display all associations for this account]' \
+    'WithCoordinators[Display all coordinators for this account]' \
+    'WithDeleted[Display information with previously deleted data]' \
+    'WithRawQOSLevel' \
+    'WOPLimits' \
+    "$(_sacctmgr_format \
+      'Account[The name of a bank account]' \
+      'Description[An arbitrary string describing an account]' \
+      'Organization[Organization to which the account belongs]' \
+      'Coordinators[List of users that are a coordinator of the account]' \
+      $assoc_format \
+    )"
+  list_accounts=($reply)
+  _sacctmgr_specs $account_specs \
+    'RawUsage[This allows an administrator to reset the raw usage accrued to an account]:value' \
+    $assoc_rec
+  add_account=($reply)
+  _sacctmgr_specs $account_cond
+  delete_accounts=($reply)
+  modify_accounts=($delete_accounts '(' $keyword_where $delete_accounts '|' $keyword_set $add_account ')' '#')
+
+  local -a list_associations
+  _sacctmgr_specs \
+    $assoc_cond \
+    'OnlyDefaults[Display only associations that are default associations]' \
+    'Tree[Display account names in a hierarchical fashion]' \
+    'WithDeleted[Display information with previously deleted data]' \
+    'WithRawQOSLevel' \
+    'WithSubAccounts[Display information with subaccounts]' \
+    'WOPInfo[Display information without parent information]' \
+    {WOPLimits,WOLimits}'[Display information without hierarchical parent limit information]' \
+    "$(_sacctmgr_format \
+      $assoc_format \
+    )"
+  list_associations=($reply)
+
+  local -a cluster_specs cluster_cond
+  cluster_specs=(
+    {Names,Clusters}'[The name of a cluster]:name'
+    'Classification[Type of machine]:classification:(capability capacity)'
+    'Federation[The federation that this cluster should be a member of]:federation:_slurm_federation'
+  )
+  cluster_cond=(
+    $cluster_specs
+    'Flags[Comma separated list of Attributes for a particular cluster]:flag list:(CrayXT FrontEnd MultipleSlurmd)'
+    'PluginIDSelect:'
+    'RPCVersions[Comma separated list of numeric RPC values]:rpc list'
+  )
+  local -a list_clusters add_cluster delete_clusters modify_clusters
+  _sacctmgr_specs $cluster_cond \
+    'WithDeleted' \
+    'WithFed[Appends federation related columns to default format options]' \
+    'WOLimits[Display information without limit information]' \
+    "$(_sacctmgr_format \
+      'Classification[Type of machine]' \
+      'Cluster[The name of the cluster]' \
+      'ControlHost[When a slurmctld registers with the database the ip address of the controller is placed here]' \
+      'ControlPort[When a slurmctld registers with the database the port the controller is listening on is placed here]' \
+      'Features[The list of features on the cluster]' \
+      'Federation[The name of the federation this cluster is a member of]' \
+      'FedState[The state of the cluster in the federation]' \
+      'FedStateRaw[Numeric value of the name of the FedState]' \
+      'Flags[Attributes possessed by the cluster]' \
+      'ID[The ID assigned to the cluster when a member of a federation]' \
+      'NodeCount[The current count of nodes associated with the cluster]' \
+      'NodeNames[The current Nodes associated with the cluster]' \
+      'PluginIDSelect[The numeric value of the select plugin the cluster is using]' \
+      'RPC[When a slurmctld registers with the database the rpc version the controller is running is placed here]' \
+      'TRES[Trackable RESources this cluster is accounting for]' \
+    )"
+  list_clusters=($reply)
+  _sacctmgr_specs $cluster_specs \
+    'Features[Features that are specific to the cluster]:comma separated list of feature names' \
+    'FedState[The state of the cluster in the federation]:state:((
+      ACTIVE\:"Cluster will actively accept and schedule federated jobs"
+      INACTIVE\:"Cluster will not schedule or accept any jobs"
+      DRAIN\:"Cluster will not accept any new jobs and will let existing federated jobs complete"
+      DRAIN+REMOVE\:"Cluster will not accept any new jobs and will remove itself from the federation once all federated jobs have completed"
+    ))' \
+    $assoc_rec
+  add_cluster=($reply)
+  _sacctmgr_specs $cluster_cond
+  delete_clusters=($reply)
+  modify_clusters=($delete_clusters '(' $keyword_where $delete_clusters '|' $keyword_set $add_cluster ')' '#')
+
+
+  local -a coordinator_specs
+  coordinator_specs=(
+    'Account[Account name to add this user as a coordinator to]:comma separated list of account names:_sequence _slurm_account'
+    'Names[Names of coordinators]:comma separated list of user names:_sequence _slurm_user'
+  )
+  local -a add_coordinator delete_coordinator
+  _sacctmgr_specs $user_cond
+  add_coordinator=($reply)
+  delete_coordinator=($reply)
+
+  local -a list_events
+  _sacctmgr_specs \
+    'All_Clusters[Get information on all cluster shortcut]' \
+    'All_Time[Get time period for all time shortcut]' \
+    'Events[Specific events to look for:OPT]:(Cluster Node)' \
+    'Clusters[List the events of the cluster(s)]:comma separated list of cluster names:_sequence _slurm_cluster' \
+    'End[Period ending of events]:OPT' \
+    'MaxCpus[Max number of CPUs affected by an event]:OPT' \
+    'MinCpus[Min number of CPUs affected by an event]:OPT' \
+    'Nodes[Node names affected by an event]:comma separated list of node names:_sequence _slurm_node' \
+    'Reason[Reason an event happened]:comma separated list of reasons' \
+    'Start[Period start of events]:OPT' \
+    'States[State of a node in a node event]:comma separated list of states' \
+    'User[Query against users who set the event]:comma separated list of users:_sequence _slurm_user' \
+    "$(_sacctmgr_format \
+      'Cluster[The name of the cluster event happened on]' \
+      'ClusterNodes[The hostlist of nodes on a cluster in a cluster event]' \
+      'Duration[Time period the event was around for]' \
+      'End[Period when event ended]' \
+      'Event[Name of the event]' \
+      'EventRaw[Numeric value of the name of the event]' \
+      'NodeName[The node affected by the event]' \
+      'Reason[The reason an event happened]' \
+      'Start[Period when event started]' \
+      'State[On a node event this is the formatted state of the node during the event]' \
+      'StateRaw[On a node event this is the numeric value of the state of the node during the event]' \
+      'TRES[Number of TRES involved with the event]' \
+      'User[On a node event this is the user who caused the event to happen]' \
+    )"
+  list_events=($reply)
+
+  local -a federation_specs federation_cond
+  federation_specs=(
+    'Name[The name of the federation]:name'
+    'Clusters[List of clusters to add/remove to a federation]:comma separated list of cluster names:_sequence _slurm_cluster'
+  )
+  federation_cond=(
+    $federation_specs
+    'Federations[The name of the federation]:name'
+  )
+  local -a list_federations add_federation delete_federations modify_federations
+  _sacctmgr_specs $federation_cond \
+    'WithDeleted' \
+    'Tree[Display federations in a hierarchical fashion]' \
+    "$(_sacctmgr_format \
+      'Features[The list of features on the cluster]' \
+      'Federation[The name of the federation]' \
+      'Cluster[Name of the cluster that is a member of the federation]' \
+      'FedState[The state of the cluster in the federation]' \
+      'FedStateRaw[Numeric value of the name of the FedState]' \
+      'Index[The index of the cluster in the federation]' \
+    )"
+  list_federations=($reply)
+  _sacctmgr_specs $federation_specs \
+    'Flags:'
+  add_federation=($reply)
+  _sacctmgr_specs $federation_cond
+  delete_federations=($reply)
+  modify_federations=($delete_federations '(' $keyword_where $delete_federations '|' $keyword_set $add_federation ')' '#')
+
+  local -a job_cond job_rec
+  _sacctmgr_specs \
+    'Cluster: :_slurm_cluster' \
+    'JobID: :_slurm_job'
+  job_cond=($reply)
+  _sacctmgr_specs \
+    {DerivedExitCode,DerivedEC}'[The derived exit code based on the user''s judgment of whether the job succeeded or failed]:' \
+    {Comment,DerivedExitString,DerivedES}'[The job''s comment string]:'
+  job_rec=($reply)
+  modify_jobs=($job_cond '(' $keyword_where $job_cond '|' $keyword_set $job_rec ')' '#')
+
+  local -a qos_specs qos_cond
+  qos_specs=(
+    'Name[Name of the QOS]:'
+    'Description:'
+    'PreemptMode[Mechanism used to preempt jobs of this QOS]:mode:((
+      Cluster\:"use cluster default"
+      Cancel Checkpoint Requeue
+    ))'
+  )
+  qos_cond=(
+    $qos_specs
+    'QOSLevel[Name of the QOS]:'
+    'Clusters: :_sequence _slurm_cluster'
+    'IDs[The id of the QOS]:'
+  )
+  local -a list_qos add_qos delete_qos modify_qos
+  _sacctmgr_specs $qos_cond \
+    'WithDeleted[Display information with previously deleted data]' \
+    "$(_sacctmgr_format \
+      'Description[An arbitrary string describing a QOS]' \
+      'GraceTime[Preemption grace time to be extended to a job which has been selected for preemption]' \
+      'GrpTRESMins[The total number of TRES minutes that can possibly be used by past, present and future]' \
+      'GrpTRES[Maximum number of TRES running jobs are able to be allocated in aggregate]' \
+      'GrpJobs[Maximum number of running jobs in aggregate]' \
+      'GrpJobsAccrue[Maximum number of pending jobs in aggregate able to accrue age priority]' \
+      'GrpSubmitJobs[Maximum number of jobs which can be in a pending or running state at any time in aggregate]' \
+      'GrpWall[Maximum wall clock time running jobs are able to be allocated in aggregate]' \
+      'MaxTRESMins[Maximum number of TRES minutes each job is able to use]' \
+      'MaxTRESPerAccount[Maximum number of TRES each account is able to use]' \
+      'MaxTRESPerJob[Maximum number of TRES each job is able to use]' \
+      'MaxTRESPerNode[Maximum number of TRES each node in a job allocation can use]' \
+      'MaxTRESPerUser[Maximum number of TRES each user is able to use]' \
+      'MaxJobsPerAccount[Maximum number of jobs each account is allowed to run at one time]' \
+      'MaxJobsPerUser[Maximum number of jobs each user is allowed to run at one time]' \
+      'MaxSubmitJobsPerAccount[Maximum number of jobs pending or running state at any time per account]' \
+      'MaxSubmitJobsPerUser[Maximum number of jobs pending or running state at any time per user]' \
+      'MaxWall[Maximum wall clock time each job is able to use]' \
+      'MinPrioThreshold[Minimum priority required to reserve resources when scheduling]' \
+      'MinTRES[Minimum number of TRES each job running under this QOS must request]' \
+      'Name[Name]' \
+      'Preempt[Other QOS'' this QOS can preempt]' \
+      'PreemptMode[Mechanism used to preempt jobs]' \
+      'Priority[What priority will be added to a job''s priority]' \
+      'UsageFactor[A float that is factored into a job''s TRES usage]' \
+    )"
+  list_qos=($reply)
+  _sacctmgr_specs $qos_specs \
+    'Flags[Used by the slurmctld to override or enforce certain characteristics]:flags:((
+      DenyOnLimit:"If set, jobs using this QOS will be rejected at submission time if they do not conform to the QOS ''Max'' limits"
+      EnforceUsageThreshold:"If set, and the QOS also has a UsageThreshold, any jobs submitted with this QOS that fall below the UsageThreshold will be held until their Fairshare Usage goes above the Threshold"
+      NoReserve:"If this flag is set and backfill scheduling is used, jobs using this QOS will not reserve resources in the backfill schedule''s map of resources allocated through time"
+      PartitionMaxNodes:"If set jobs using this QOS will be able to override the requested partition''s MaxNodes limit"
+      PartitionMinNodes:"If set jobs using this QOS will be able to override the requested partition''s MinNodes limit"
+      OverPartQOS:"If set jobs using this QOS will be able to override any limits used by the requested partition''s QOS limits"
+      PartitionTimeLimit:"If set jobs using this QOS will be able to override the requested partition''s TimeLimit"
+      RequiresReservaton:"If set jobs using this QOS must designate a reservation when submitting a job"
+      NoDecay:"If set, this QOS will not have its GrpTRESMins, GrpWall and UsageRaw decayed by the slurm.conf PriorityDecayHalfLife or PriorityUsageResetPeriod settings"
+      UsageFactorSafe:"If set, and AccountingStorageEnforce includes Safe, jobs will only be able to run if the job can run to completion with the UsageFactor applied"
+    ))' \
+    'GraceTime[Preemption grace time to be extended to a job which has been selected for preemption]:' \
+    'GrpTRESMins[The total number of TRES minutes that can possibly be used by past, present and future jobs running from this QOS]:' \
+    'GrpTRESRunMins[Used to limit the combined total number of TRES minutes used by all jobs running with this QOS]:' \
+    'GrpTRES[Maximum number of TRES running jobs are able to be allocated in aggregate for this QOS]:' \
+    'GrpJobs[Maximum number of running jobs in aggregate for this QOS]:' \
+    'GrpJobsAccrue[Maximum number of pending jobs in aggregate able to accrue age priority for this QOS]:' \
+    'GrpSubmitJobs[Maximum number of jobs which can be in a pending or running state at any time in aggregate for this QOS]:' \
+    'GrpWall[Maximum wall clock time running jobs are able to be allocated in aggregate for this QOS]:' \
+    'MaxTRESMins[Maximum number of TRES minutes each job is able to use]:' \
+    'MaxTRESPerAccount[Maximum number of TRES each account is able to use]:' \
+    'MaxTRESPerJob[Maximum number of TRES each job is able to use]:' \
+    'MaxTRESPerNode[Maximum number of TRES each node in a job allocation can use]:' \
+    'MaxTRESPerUser[Maximum number of TRES each user is able to use]:' \
+    'MaxJobsAccruePerAccount[Maximum number of pending jobs an account (or subacct) can have accruing age priority at any given time]:' \
+    'MaxJobsAccruePerUser[Maximum number of pending jobs a user can have accruing age priority at any given time]:' \
+    'MaxJobsPerAccount[Maximum number of jobs each account is allowed to run at one time]:' \
+    'MaxJobsPerUser[Maximum number of jobs each user is allowed to run at one time]:' \
+    'MinPrioThreshold[Minimum priority required to reserve resources when scheduling]:' \
+    'MinTRESPerJob[Minimum number of TRES each job running under this QOS must request]:' \
+    'MaxSubmitJobsPerAccount[Maximum number of jobs pending or running state at any time per account]:' \
+    'MaxSubmitJobsPerUser[Maximum number of jobs pending or running state at any time per user]:' \
+    'MaxWall[Maximum wall clock time each job is able to use]:' \
+    'Preempt[Other QOS'' this QOS can preempt]:' \
+    'PreemptExemptTime[Specifies a minimum run time for jobs of this QOS before they are considered for preemption]:' \
+    'Priority[What priority will be added to a job''s priority when using this QOS]:' \
+    'RawUsage[This allows an administrator to reset the raw usage accrued to a QOS]:value' \
+    'UsageFactor[Usage factor when running with this QOS]:' \
+    'UsageThreshold[A float representing the lowest fairshare of an association allowable to run a job]:'
+  add_qos=($reply)
+  _sacctmgr_specs $qos_cond
+  delete_qos=($reply)
+  modify_qos=($delete_qos '(' $keyword_where $delete_qos '|' $keyword_set $add_qos ')' '#')
+
+  local -a resource_specs resource_cond
+  resource_specs=(
+    'Names[Comma separated list of the name of a resource configured on the system being controlled by a resource manager]:OPT'
+    'Clusters[Comma separated list of cluster names on which specified resources are to be available]:name list:_sequence _slurm_cluster'
+    'Description[A brief description of the resource]:'
+    'Server[The name of the server serving up the resource]:OPT'
+    'ServerType[The type of a software resource manager providing the licenses]:OPT'
+    'PercentAllowed[Percentage of a specific resource that can be used on specified cluster]:percent allowed'
+  )
+  resource_cond=(
+    $resource_specs
+    'Ids:'
+  )
+  local -a list_resource add_resource delete_resource modify_resource
+  _sacctmgr_specs $resource_cond \
+    'WithDeleted' \
+    'WithClusters[Display the clusters percentage of resources]' \
+    "$(_sacctmgr_format \
+      'Cluster[Name of cluster resource is given to]' \
+      'Count[The count of a specific resource configured on the system globally]' \
+      'Allocated[The percent of licenses allocated to a cluster]' \
+      'Description' \
+      'ServerType[The type of the server controlling the licenses]' \
+      'Name' \
+      'Server[Server serving up the resource]' \
+      'Type[Type of resource this record represents]' \
+    )"
+  list_resource=($reply)
+  _sacctmgr_specs $resource_specs \
+    'Resources[Comma separated list of the name of a resource configured on the system being controlled by a resource manager]:OPT' \
+    'Count[Number of software resources of a specific name configured on the system being controlled by a resource manager]:OPT' \
+    'Flags[Flags that identify specific attributes of the system resource]:OPT' \
+    'Type[The type of the resource represented by this record]:OPT:(License)'
+  add_resource=($reply)
+  _sacctmgr_specs $resource_cond
+  delete_resource=($reply)
+  modify_resource=($delete_resource '(' $keyword_where $delete_resource '|' $keyword_set $add_resource ')' '#')
+
+  local -a list_reservation
+  _sacctmgr_specs \
+    'Clusters[List the reservations of the cluster(s)]:comma separated list of cluster names:_sequence _slurm_cluster' \
+    'End[Period ending of reservations]:OPT' \
+    'Ids[Comma separated list of reservation ids]:OPT' \
+    'Names[Comma separated list of reservation names]:OPT' \
+    'Nodes[Node names where reservation ran]:comma separated list of node names:_sequence _slurm_node' \
+    'Start[Period start of reservations]:OPT' \
+    "$(_sacctmgr_format \
+      'Associations[The id''s of the associations able to run]' \
+      'Cluster[Name of cluster]' \
+      'End[End time]' \
+      'Flags' \
+      'ID' \
+      'Name' \
+      'NodeNames[List of nodes]' \
+      'Start[Start time]' \
+      'TRES[List of TRES]' \
+      'UnusedWall[Wall clock time in seconds unused by any job]' \
+    )"
+  list_reservation=($reply)
+
+  local -a list_runawayjobs
+  _sacctmgr_specs \
+    'Cluster: :_sequence _slurm_cluster' \
+    "$(_sacctmgr_format \
+      'Cluster[Name of cluster]' \
+      'ID' \
+      'Name' \
+      'Partition' \
+      'State[Current State]' \
+      'TimeStart[Time job started running]' \
+      'TimeEnd[Current recorded time of the end of the job]' \
+    )"
+  list_runawayjobs=($reply)
+
+  local -a list_transactions
+  _sacctmgr_specs \
+    'WithAssoc[Get information about which associations were affected by the transactions]' \
+    {Ids,Txn}':' \
+    'Accounts[Only print out the transactions affecting specified accounts]:comma separated list of account names:_sequence _slurm_account' \
+    'Action[]:Specific action the list will display' \
+    'Actors[Only display transactions done by a certain person]:Specific name the list will display' \
+    'Clusters[Only print out the transactions affecting specified clusters]:comma separated list of cluster names:_sequence _slurm_cluster' \
+    'End[Return all transactions before this Date and time]:Date and time of last transaction to return' \
+    'Start[Return all transactions after this Date and time]:Date and time of first transaction to return' \
+    'Users[Only print out the transactions affecting specified users]:comma separated list of user names:_sequence _slurm_user' \
+    "$(_sacctmgr_format \
+      'Action' \
+      'Actor' \
+      'Info' \
+      'TimeStamp' \
+      'Where' \
+    )"
+  list_transactions=($reply)
+
+  local -a list_tres
+  _sacctmgr_specs \
+    'WithDeleted' \
+    'Type:The type of the trackable resource:(BB CPU Energy GRES License Memory Node)' \
+    'Names:The name of the trackable resource' \
+    'Ids:The identification number of the trackable resource as it appears in the database' \
+    "$(_sacctmgr_format \
+      'ID' \
+      'Name' \
+      'Type' \
+    )"
+  list_tres=($reply)
+
+  local -a user_specs user_cond user_rec
+  user_specs=(
+    'AdminLevel[Admin level of user]:level:(None Operator Admin)'
+    'DefaultAccount[Identify the default bank account name to be used for a job if none is specified at submission time]:account:_slurm_account'
+    'DefaultWCKey[Identify the default Workload Characterization Key]:defaultwckey'
+    #'Account[Account name to add this user to]:account:_slurm_account'
+    #'Partition[Partition name]:name:_slurm_partition'
+  )
+  user_cond=(
+    $user_specs
+    {Names,Users}'[Name of user]:name'
+    'Clusters[Specific cluster to add user to the account on]:cluster:_slurm_cluster'
+    $assoc_cond
+  )
+  _sacctmgr_specs $user_specs \
+    'NewName[Use to rename a user in the accounting database]:newname' \
+    'RawUsage[This allows an administrator to reset the raw usage accrued to a user]:value' \
+    $assoc_rec
+  user_rec=($reply)
+  local -a list_users add_user delete_users modify_users
+  _sacctmgr_specs $user_cond \
+    'WithAssoc[Display all associations for this user]' \
+    'WithCoord[Display all accounts a user is coordinator for]' \
+    'WithDeleted[Display information with previously deleted data]' \
+    'WithRawQOSLevel' \
+    'WOPLimits' \
+    "$(_sacctmgr_format \
+      'AdminLevel' \
+      'DefaultAccount' \
+      'Coordinators[List of users that are a coordinator of the account]' \
+      'User[The name]' \
+      $assoc_format \
+    )"
+  list_users=($reply)
+  _sacctmgr_specs $user_specs \
+    {Names,Users}'[Name of user]:name' \
+    'WCKeys[Workload Characterization Key values]:wckeys:_slurm_wckey' \
+    $assoc_rec $assoc_cond
+  add_user=($reply)
+  _sacctmgr_specs $user_cond
+  delete_users=($reply)
+  modify_users=($delete_users '(' $keyword_where $delete_users '|' $keyword_set $user_rec ')' '#')
+
+  local -a list_wckeys
+  _sacctmgr_specs \
+    'withdeleted' \
+    {WCKeys,Names}':Workload Characterization Key' \
+    'Ids:' \
+    'Clusters:Specific cluster for the WCKey:_slurm_cluster' \
+    'End:' \
+    'Start:' \
+    'Users:The name of a user for the WCKey:_slurm_user' \
+    "$(_sacctmgr_format \
+      'Cluster' \
+      'ID' \
+      'Name' \
+      'User' \
+    )"
+  list_wckeys=($reply)
+
+
+  local -a cmd_list
+  _sacctmgr_entities list \
+    'ac*counts acct' \
+    'as*sociations' \
+    'cl*usters' \
+    'co*nfiguration' \
+    'e*vents' \
+    'f*ederation' \
+    'p*roblems' \
+    'q*os' \
+    'reso*urce' \
+    'rese*rvations resv' \
+    'ru*nawayjobs o*rphanjobs l*ostjobs' \
+    's*tats' \
+    't*ransactions tx*n' \
+    'tr*es' \
+    'u*sers' \
+    'w*ckeys'
+  cmd_list=($reply)
+
+  local -a cmd_add
+  _sacctmgr_entities add \
+    'a*ccount acct' \
+    'cl*uster' \
+    'co*ordinator' \
+    'f*ederation' \
+    'q*os' \
+    'r*esource' \
+    'u*ser'
+  cmd_add=($reply)
+
+  local -a cmd_delete
+  _sacctmgr_entities delete \
+    'a*ccounts acct' \
+    'cl*usters' \
+    'co*ordinators' \
+    'f*ederations' \
+    'q*os' \
+    'r*esource' \
+    'u*sers'
+  cmd_delete=($reply)
+
+  local -a cmd_modify
+  _sacctmgr_entities modify \
+    'a*ccounts acct' \
+    'clust*ers' \
+    'f*ederations' \
+    'j*ob' \
+    'q*os' \
+    'r*esource' \
+    'u*sers'
+  cmd_modify=($reply)
+
+  local -a cmd_clear
+  _regex_words clear clear 's*tats:stats:$popts'
+  cmd_clear=($reply)
+
+  local -a cmd_archive archive_dump archive_load
+  _sacctmgr_specs \
+    'Directory[Directory to store the archive data]: :_directories' \
+    'Events[Archive Events]' \
+    'Jobs[Archive Jobs]: ::_sequence _slurm_job' \
+    'PurgeEventAfter[Purge cluster event records older than time stated in months]:' \
+    'PurgeJobAfter[Purge job records older than time stated in months]:' \
+    'PurgeStepAfter[Purge step records older than time stated in months]:' \
+    'PurgeSuspendAfter[Purge job suspend records older than time stated in months]:' \
+    'Script[Run this script instead of the generic form of archive to flat files]: :_path_files -g *(*)' \
+    'Steps[Archive Steps]' \
+    'Suspend[Archive Suspend Data]' \
+    'reservations' \
+    'txn' \
+    'usage' \
+    'clusters: :_sequence _slurm_cluster' \
+    'accounts: :_sequence _slurm_account' \
+    'associations:' \
+    'gid:' \
+    'partitions: :_sequence _slurm_partition' \
+    'users: :_sequence _slurm_user'
+  archive_dump=($reply)
+  _sacctmgr_specs \
+    'File[File to load into database]:_files' \
+    'Insert[SQL to insert directly into the database]'
+  archive_load=($reply)
+  _regex_words archive archine \
+    'd*ump: :$popts $archive_dump' \
+    'l*oad:load in to the database previously archived data:$popts $archive_load'
+  cmd_archive=($reply)
+
+  local -a cmd_dump
+  _sacctmgr_specs \
+    'File[will default to clustername.cfg if no file is given]:filename:_files'
+    #'Cluster[cluster name]:cluster:_slurm_cluster'
+  cmd_dump=($any ':cluster:cluster name:_slurm_cluster' $reply)
+
+  local -a cmd
+  _regex_words command command \
+    {add,cre\*ate}':add entity:$popts $cmd_add' \
+    'arc*hive:archive past jobs and/or steps, or load them back into the databse:$popts $cmd_archive' \
+    'cle*ar:clear server statistics:$popts $cmd_clear' \
+    {del\*ete,rem\*ove}':delete the specified entity(s):$popts $cmd_delete' \
+    'dum*p:dump database information of the specified cluster to the flat file:$popts $cmd_dump' \
+    'he*lp:print this description of use' \
+    {lis\*t,sho\*w}':display info of identified entity:$popts $cmd_list' \
+    'lo*ad:read in the file to update the database with the file contents:$popts $cmd_load' \
+    {m\*odify,u\*pdate}':modify entity:$popts $cmd_modify' \
+    'reco*nfigure:reread the slurmdbd.conf on the DBD:$popts' \
+    'ro*llup' \
+    'shut*down:shutdown the server:$popts' \
+    'vers*ion:display tool version number:$popts'
+  cmd=($reply)
+
+  _regex_arguments _sacctmgr $any $opts $cmd
+  _sacctmgr "$@"
+  return
+  ;;
+
+(salloc)
+  _arguments -s -C \
+    $common_options \
+    {-b+,--begin=}'[defer job until HH:MM MM/DD/YY]:time: ' \
+    '--bell[ring the terminal bell when the job is allocated]' \
+    '--delay-boot=[delay boot for desired node features]:mins: ' \
+    {-I-,--immediate=}'[exit if resources not available in \"secs\"]::secs: ' \
+    {-K-,--kill-command=}'[signal to send terminating job]::signal:_signals' \
+    '--get-user-env=[used by Moab]::[timeout][mode]: ' \
+    '--no-bell[do NOT ring the terminal bell]' \
+    '--no-shell[immediately exit after allocating resources, without running a command]' \
+    '--wait-all-nodes=[controls when the execution of the command begins with respect to when nodes are ready for use]:value:((0\:"Begin execution as soon as allocation can be made" 1\:"Do not begin execution until all nodes are ready for use"))' \
+    '--x11=[Sets up X11 forwarding on all, first or last node(s) of the allocation]::all|first|last:(all first last)'
+  ;;
+
+(sattach)
+  _arguments -s -C \
+    '--input-filter=[send stdin to only the specified task]:taskid: ' \
+    '--output-filter=[only print stdout from the specified task]:taskid: ' \
+    '--error-filter=[only print stderr from the specified task]:taskid: ' \
+    {-l,--label}'[prepend task number to lines of stdout & stderr]' \
+    '--layout[print task layout info and exit (does not attach to tasks)]' \
+    {-Q,--quiet}'[quiet mode (suppress informational messages)]' \
+    {-v,--verbose}'[verbose mode (multiple -v''s increase verbosity)]' \
+    {-V,--version}'[print the Slurm version and exit]' \
+    {-h,--help}'[print this help message]' \
+    {-u,--usage}'[print a brief usage message]' \
+    '1:jobid.stepid:_slurm_job'
+  # TODO: only user's jobs, mandatory stepid
+  ;;
+
+(sbatch)
+  _arguments -s -C \
+    $common_options \
+    {-a+,--array=}'[job array index values]:indexes: ' \
+    '--batch=[constraints on batch host]:list:_slurm_node_feature' \
+    '--checkpoint=[job step checkpoint interval]:time: ' \
+    {-e+,--error=}'[file for batch script''s standard error]:err: ' \
+    '--export=[specify environment variables to export]:names:->export' \
+    '--export-file=[specify environment variables file or file descriptor to export]:file|fd:_files' \
+    '--get-user-env=[load environment from local cluster]::[timeout][mode]; ' \
+    '--ignore-pbs[Ignore #PBS options in the batch script]' \
+    {-i+,--input=}'[file for batch script''s standard input]:in:_files' \
+    '--kill-on-invalid-dep=[terminate the job when it has invalid dependencies]:yes|no:(yes no)' \
+    '--no-requeue[if set, do not permit the job to be requeued]' \
+    {-o+,--output=}'[file for batch script''s standard output]:out:_files' \
+    '--open-mode=[mode to open the output and error files]:append|truncate:(append truncate)' \
+    '--parsable[outputs only the jobid and cluster name (if present), separated by semicolon, only on successful submission]' \
+    '--propagate=[propagate all \[or specific list of\] rlimits]::rlimits:->rlimits' \
+    '--requeue[if set, permit the job to be requeued]' \
+    '--test-only[Validate the batch script and return an estimate of when a job would be scheduled]' \
+    {-W,--wait}'[wait for completion of submitted job]' \
+    '--wait-all-nodes=[controls when the execution of the command begins]:value:((0\:"Begin execution as soon as allocation can be made" 1\:"Do not begin execution until all nodes are ready for use"))' \
+    '(*)--wrap=[wrap command string in a sh script and submit]:command:_cmdstring'
+  ;;
+
+(sbcast)
+  _arguments -s -C \
+    {-C+,--compress=}'[compress the file being transmitted]::library:(lz4 none zlib)' \
+    {-f,--force}'[replace destination file as required]' \
+    {-F+,--fanout=}'[specify message fanout]:num: ' \
+    {-j+,--jobid=}'[specify job ID with optional pack job offset and/or step ID]:#[+#][.#]:_slurm_job' \
+    {-p,--preserve}'[preserve modes and times of source file]' \
+    {-s+,--size=}'[block size in bytes (rounded off)]:num: ' \
+    {-t+,--timeout=}'[specify message timeout (seconds)]:secs: ' \
+    {-v,--verbose}'[provide detailed event logging]' \
+    {-V,--version}'[print version information and exit]' \
+    '--help[show this help message]' \
+    '--usage[display brief usage message]' \
+    '1:SOURCE:_files' \
+    '2:DEST:_files'
+  # TODO: DEST must be absolute
+  ;;
+
+(scancel)
+  _arguments -s -C \
+    {-A+,--account=}'[act only on jobs charging this account]:account:_slurm_account' \
+    {-b,--batch}'[signal batch shell for specified job]' \
+    '--ctld[send request directly to slurmctld]' \
+    {-f,--full}'[signal batch shell and all steps for specified job]' \
+    {-H,--hurry}'[avoid burst buffer stage out]' \
+    {-i,--interactive}'[require response from user for each job]' \
+    {-M+,--clusters=}'[clusters to issue commands to]:cluster:_slurm_cluster' \
+    {-n+,--name=}'[act only on jobs with this name]:job_name:_slurm_jobname' \
+    {-p+,--partition=}'[act only on jobs in this partition]:partition:_slurm_partition' \
+    {-Q,--quiet}'[disable warnings]' \
+    {-q+,--qos=}'[act only on jobs with this quality of service]:qos:_slurm_qos' \
+    {-R+,--reservation=}'[act only on jobs with this reservation]:reservation:_slurm_reservation' \
+    '--sibling=[remove an active sibling job from a federated job]:cluster_name:_slurm_cluster' \
+    {-s+,--signal=}'[signal to send to job, default is SIGKILL]:name|int:_signals' \
+    {-t+,--state=}'[act only on jobs in this state]:states:(PENDING RUNNING SUSPENDED)' \
+    {-u+,--user=}'[act only on jobs of this user]:user_name:_slurm_user' \
+    {-V,--version}'[output version information and exit]' \
+    {-v,--verbose}'[verbosity level]' \
+    {-w+,--nodelist=}'[act only on jobs on these nodes]:nodes:_sequence _slurm_node' \
+    '--wckey=[act only on jobs with this workload charactization key]:wckey:_slurm_wckey' \
+    '--help[show this help message]' \
+    '--usage[display brief usage message]' \
+    '1:job_id[_array_id][.step_id]:_slurm_job'
+  # TODO: only user's jobs
+  ;;
+
+(scontrol)
+  local -a reply
+  local any=$'/[^\0]#\0/'
+
+  local -a opts popts
+  _regex_words option options \
+    {-a,--all}':Equivalent to \"all\" command' \
+    {-d,--details}':Equivalent to \"details\" command' \
+    '--federation:Report federated job information if a member of a one' \
+    {-F,--future}':Report information about nodes in \"FUTURE\" state' \
+    {-h,--help}':Equivalent to \"help\" command' \
+    '--hide:Equivalent to \"hide\" command' \
+    '--local:Report information only about jobs on the local cluster' \
+    {-M,--cluster}':Equivalent to \"cluster\" command' \
+    {-o,--oneliner}':Equivalent to \"oneliner\" command' \
+    {-Q,--quiet}':Equivalent to \"quiet\" command' \
+    '--sibling:Report information about all sibling jobs on a federated cluster' \
+    {-u,--uid}':Update job as user \"uid\" instead of the invoking user' \
+    {-v,--verbose}':Equivalent to \"verbose\" command' \
+    {-V,--version}':Equivalent to \"version\" command'
+  opts=($reply '#')
+  # opts that can be put anywhere -- really same as $opts but it makes completion options too messsy:
+  popts=()
+
+  local -a nodename nodelist jobid joblist filename partition reservation
+  nodename=($any ':node:nodename:_slurm_node')
+  nodelist=($any ':nodelist:nodelist:_sequence _slurm_node')
+  nodelist_or_file=('(' $'/[^\0]#\0\//' ':nodefile:nodefile:_files' '|' $any ':nodelist:nodelist:_sequence _slurm_node' ')')
+  jobid=($any ':job_id:job_id[.step_id]:_slurm_job')
+  joblist=($jobid '#')
+  filename=($any ':file:file:_files')
+  partition=($any ':partition:partitionname:_slurm_partition')
+  reservation=($any ':reservation:reservation_name:_slurm_reservation')
+
+  # TODO: case-insentitive:
+  
+  local -a checkpoint_args checkpoint_restart
+  checkpoint_args=($jobid '(' $popts $any ':checkpoint_args:CKPT_OP:'"$(_slurm_regexi_values -S = checkpoint_args \
+    'MaxWait[Maximum time for checkpoint to be written]:seconds' \
+    'ImageDir[Location of checkpoint file]:directory_name:_directories' \
+  )" ')' '#')
+  checkpoint_restart=($jobid '(' $popts $any ':checkpoint_args:CKPT_OP:'"$(_slurm_regexi_values -S = checkpoint_args \
+    'ImageDir[Location of checkpoint file]:directory_name:_directories' \
+    'StickToNodes[If set, resume job on the same nodes are previously used]' \
+  )" ')' '#')
+
+  local -a cmd_checkpoint
+  _regex_words checkpoint 'CKPT_OP' \
+    'a*ble:Test if presently not disabled, report start time if checkpoint in progress:$popts $jobid' \
+    'co*mplete: :$popts $jobid' \
+    'd*isable:Disable future checkpoints:$popts $jobid' \
+    'en*able:Enable future checkpoints:$popts $jobid' \
+    'cr*eate:Create a checkpoint and continue the job or job step:$popts $checkpoint_args' \
+    'req*ueue:Create a checkpoint and requeue the batch job, combines vacate and restart operations:$popts $checkpoint_args' \
+    'va*cate:Create a checkpoint and terminate the job or job step:$popts $checkpoint_args' \
+    'res*tart:Restart execution of the previously checkpointed job or job step:$popts $checkpoint_restart' \
+    'er*ror:Report the result for the last checkpoint request, error code and message:$popts $jobid'
+  cmd_checkpoint=($reply)
+
+  local -a cmd_reboot
+  # FIXME: ALL should be in place of nodelist
+  cmd_reboot=('(' $popts $any ':reboot_args:args:'"$(_slurm_regexi_values -S = reboot_args \
+    'ASAP' \
+    'Reason:reason: ' \
+    'nextstate:nextstate:(DOWN RESUME)' \
+    'ALL' \
+  )" ')' '#' $nodelist)
+
+  local -a cmd_setdebug
+  cmd_setdebug=($any ':debuglevel:level:(quiet fatal error info verbose debug debug2 debug3 debug4 debug5)')
+
+  local -a debugflags cmd_setdebugflags
+  debugflags=(Accrue Agent Backfill BackfillMap BurstBuffer CPU_Bind DB_Archive DB_Assoc DB_TRES DB_Event DB_Job DB_QOS DB_Query DB_Reservation DB_Resource DB_Step DB_Usage DB_WCKey Elasticsearch Energy ExtSensors Federation FrontEnd Gang Gres HeteroJobs Federation Interconnect Filesystem JobContainer License NO_CONF_HASH NodeFeatures NoRealTime Priority Profile Protocol Reservation Route SelectType Steps Switch Task TraceJobs TRESNode Trigger Triggers CpuFrequency Power PowerSave TimeCray)
+  cmd_setdebugflags=($any ':debugflag:[+-]flag:('"+${(j: +:)debugflags} -${(j: -:)debugflags}"')')
+
+  local -a cmd_schedloglevel
+  cmd_schedloglevel=($any ':slevel:level:(disable enable 0 1)')
+
+  local -a show_assoc
+  show_assoc=($any ':assoc_mgr_tags:tags:'"$(_slurm_regexi_values -S = assoc_mgr_tags \
+    'accounts: :_sequence _slurm_account' \
+    'flags: :(users assoc qos)' \
+    'qos: :_sequence _slurm_qos' \
+    'users: :_sequence _slurm_user' \
+  )" '#')
+
+  local -a show_layouts
+  show_layouts=($any ':layout_tags:tags:'"$(_slurm_regexi_values -S = layout_tags \
+    'layouts: : ' \
+    'entity: : ' \
+    'type: : ' \
+    'nolayout' \
+  )" '#')
+
+  local -a cmd_show
+  _regex_words show 'ENTITY' \
+    'al*iases:report which aliases should be running on this node:$nodename' \
+    {bb\*stat,dw\*stat}':print burst buffer status information:' \
+    'bu*rstbuffer:print all burst buffer information:' \
+    {as\*soc_mgr,ca\*che}':display association manager information:$show_assoc' \
+    'co*nfig' \
+    'd*aemons' \
+    'Fe*derations' \
+    'Fr*ontendName:print information about all front end nodes:$nodelist' \
+    'hostn*ames: :$nodelist' \
+    'hostl*ist: :$nodelist_or_file' \
+    'hostlists*orted: :$nodelist_or_file' \
+    {j\*obs,jobid}': :$jobid' \
+    'la*youts: :$show_layouts' \
+    'li*censes: :' \
+    'n*odes: :$nodelist' \
+    {pa\*rtitions,partitionname}': :$partition' \
+    'po*wercapping: :$nodelist' \
+    {r\*eservation,reservationname}': :$reservation' \
+    'sl*urmd: :$nodelist' \
+    'st*eps: :$jobid' \
+    't*opology: :$nodelist'
+  cmd_show=($reply)
+
+  local -a cmd_shutdown
+  cmd_shutdown=($any ':shutdown_args:args:(slurmctld controller)')
+
+  local -a cmd_write
+  _regex_words write 'write_args' \
+    'batch*_script:Write the batch script for a given job to a local file:$popts $jobid $filename' \
+    'config:Write the current configuration to a file with a .DATETIME suffix:$popts $filename'
+  cmd_write=($reply)
+
+  _scontrol_specs () {
+    local regex=$1 flag=$2 comp=$3 ; shift 3
+    reply=('(' "/(#i)$regex="$'[^\0]#\0/' ':create_type:type:'"$(_slurm_regexi_values -S = create_type "$flag: :$comp")")
+    if [[ $# -gt 0 ]] ; then
+      reply=($reply $any ":_create_$flag:SPECIFICATIONS:$(_slurm_regexi_values -S = create_$flag "$@")" '#')
+    fi
+    reply=($reply ')')
+  }
+
+  local -a cmd_create cmd_update
+  _scontrol_specs 'par(|t(|i(|t(|i(|o(|n(|n(|a(|m(|e))))))))))' partition _slurm_partition \
+    'MaxTime: : ' \
+    'CpuBind: :_values -s , cpu-bind no none board socket ldom core thread off verbose' \
+    'DefaultTime: : ' \
+    'MaxCPUsPerNode: :(UNIMITED INFINITE)' \
+    'MaxNodes: :(UNLIMITED INFINITE)' \
+    'MinNodes: : ' \
+    'Default: :(NO YES)' \
+    'DisableRootJobs: :(NO YES)' \
+    'ExclusiveUser: :(NO YES)' \
+    'Hidden: :(NO YES)' \
+    'LLN: :(NO YES)' \
+    'RootOnly: :(NO YES)' \
+    'ReqResv: :(NO YES)' \
+    {OverSubscribe,Shared}': :(NO EXCLUSIVE YES FORCE)' \
+    'OverTimeLimit: :(UNLIMITED INFINITE)' \
+    'PreemptMode: :_values -s , preempt-mode gang off cluster cancel checkpoint requeue on suspend' \
+    'Priority: : ' \
+    'PriorityJobFactor: : ' \
+    'PriorityTier: : ' \
+    'State: :(INACTIVE DOWN UP DRAIN)' \
+    'Nodes: :_sequence _slurm_node' \
+    'AllowGroups: :_sequence _groups' \
+    'AllowAccounts: :_sequence _slurm_account' \
+    'AllowQos: :_sequence _slurm_qos' \
+    'DenyAccounts: :_sequence _slurm_account' \
+    'DenyQos: :_sequence _slurm_qos' \
+    'AllocNodes: : ' \
+    'Alternative: : ' \
+    'GraceTime: : ' \
+    'DefMemPerCPU: : ' \
+    'DefMemPerNode: : ' \
+    'MaxMemPerCPU: : ' \
+    'MaxMemPerNode: : ' \
+    'QoS: :_slurm_qos' \
+    'JobDefaults: : ' \
+    'TresBillingWeights: : '
+  cmd_create=('(' $reply)
+  cmd_update=('(' $reply)
+
+  local -a resvflags
+  resvflags=(Maintenance Overlap Flex Ignore_Jobs Weekday Weekend Weekly Any_Nodes License_Only Static_Alloc Part_Nodes PURGE_COMP First_Cores Time_Float Replace Replace_Down NO_HOLD_JOBS_AFTER_END)
+  _scontrol_specs 'res(|e(|r(|v(|a(|t(|i(|o(|n(|n(|a(|m(|e))))))))))))' reservation _slurm_reservation \
+    'Accounts: :_sequence _slurm_account' \
+    "Flags: :_values -s , $resvflags +${(j: +:)resvflags} -${(j: -:)resvflags}" \
+    'Users: :_sequence _slurm_user' \
+    'BurstBuffer: : ' \
+    'StartTime: : ' \
+    'EndTime: : ' \
+    'Duration: : ' \
+    'NodeCount: : ' \
+    'CoreCount: : ' \
+    'CPUCount: : ' \
+    'Nodes: :_sequence _slurm_node' \
+    'Features: :_slurm_node_feature' \
+    'Licenses: : ' \
+    'TRES: : ' \
+    'Watts: : '
+  cmd_create=($cmd_create '|' $reply ')')
+  cmd_update=($cmd_update '|' $reply)
+
+  _scontrol_specs 'nod(|e(|n(|a(|m(|e)))))' node \
+    'NodeAddr: : ' \
+    'NodeHostName: : ' \
+    'ActiveFeatures: :_slurm_node_feature' \
+    'CpuBind: :_values -s , cpu-bind no none board socket ldom core thread off verbose' \
+    {Features,AvailableFeatures}': : ' \
+    'Gres: : ' \
+    'Weight: :(UNLIMITED INFINITE)' \
+    'Reason: : ' \
+    'State: :(NoResp CANCEL_REBOOT DRAIN FAIL FUTURE RESUME POWER_DOWN POWER_UP UNDRAIN DOWN IDLE ALLOCATED ERROR MIXED)'
+  cmd_update=($cmd_update '|' $reply)
+
+  _scontrol_specs 'job(|i(|d)|(|n(|a(|m(|e)))))' job _slurm_job \
+    'Nice::' \
+    'ResetAccrueTime' \
+    'AdminComment: : ' \
+    'SiteFactor: : ' \
+    'ArrayTaskThrottle: : ' \
+    'Comment: : ' \
+    'Clusters: : ' \
+    'ClusterFeatures: : ' \
+    'DelayBoot: : ' \
+    'TimeLimit: : ' \
+    'TimeMin: : ' \
+    'Priority: : ' \
+    'CPUsPerTask: : ' \
+    'CPUsPerTres: : ' \
+    'NumCPUs: : ' \
+    {NumTasks,ReqProcs}': : ' \
+    'Requeue: : ' \
+    {Req,Num}'Nodes: : ' \
+    'ReqSockets: : ' \
+    'ReqCores: : ' \
+    'TasksPerNode: : ' \
+    'ReqThreads: : ' \
+    'MinCPUsNode: : ' \
+    'MinMemoryNode: : ' \
+    'MinMemoryCPU: : ' \
+    'MinTmpDiskNode: : ' \
+    'Partition: :_slurm_partition' \
+    'QOS: :_slurm_qos' \
+    'ReservationName: :_slurm_reservation' \
+    'Name: : ' \
+    'WCKey: :_slurm_wckey' \
+    'StdOut: : ' \
+    'Switches: : ' \
+    'wait-for-switch: : ' \
+    {OverSubscribe,Shared}': :(YES NO)' \
+    'Contiguous: :(YES NO)' \
+    'CoreSpec: : ' \
+    'MemPerTres: : ' \
+    'ThreadSpec: : ' \
+    'TresBind: : ' \
+    'TresFreq: : ' \
+    'TresPerJob: : ' \
+    'TresPerNode: : ' \
+    'TresPerSocket: : ' \
+    'TresPerTask: : ' \
+    'ExcNodeList: :_sequence _slurm_node' \
+    {,Req}'NodeList: :_sequence _slurm_node' \
+    'Features: :_slurm_node_feature' \
+    'Gres: :(help list)' \
+    'Account: :_slurm_account' \
+    'BurstBuffer: : ' \
+    'Dependency: : ' \
+    'Licenses: :_slurm_licenses' \
+    {Eligible,Start}'Time: : ' \
+    'EndTime: : ' \
+    'Reboot: :(YES NO)' \
+    'UserId: :_slurm_user' \
+    'Deadline: : '
+  cmd_update=($cmd_update '|' $reply)
+
+  _scontrol_specs 'step(|i(|d))' step ' ' \
+    'TimeLimit: : ' \
+    'CompFile: : '
+  cmd_update=($cmd_update '|' $reply)
+
+  _scontrol_specs 'fr(|o(|n(|t(|e(|n(|d(|n(|a(|m(|e))))))))))' frontend ' ' \
+    'Reason: : ' \
+    'State: :(DRAIN DOWN RESUME)'
+  cmd_update=($cmd_update '|' $reply)
+
+  _scontrol_specs 'sl(|u(|r(|m(|c(|t(|l(|d(|d(|e(|b(|u(|g))))))))))))' slurmctld ' '
+  cmd_update=($cmd_update '|' $reply)
+
+  _scontrol_specs 'layou(|t(|s))' layout ' ' \
+    'entity: : '
+  cmd_update=($cmd_update '|' $reply)
+
+  _scontrol_specs 'pow(|e(|r(|c(|a(|p)))))' powercap ' '
+  cmd_update=($cmd_update '|' $reply ')')
+
+  local -a cmd_delete
+  cmd_delete=($any ':delete_args:args:'"$(_slurm_regexi_values -S = delete_args \
+    'Partition: :_slurm_partition' \
+    'Reservation: :_slurm_reservation' \
+  )")
+
+  local -a cmd
+  _regex_words command command \
+    'abort:shutdown slurm controller immediately generating a core file:$popts' \
+    'can*cel_reboot:Cancel pending reboot on nodes:$popts $nodelist' \
+    'co*mpleting:display jobs in completing state along with their completing or down nodes:$popts' \
+    'cr*eate:create a new partition or reservation:$popts $cmd_create' \
+    {er\*rnumstr,errno\*str}':Given a Slurm error number, return a descriptive string:$popts $any' \
+    'help:print this description of use:$popts' \
+    'pid*info:return slurm job information for given pid:$popts $any' \
+    'pin*g:print status of slurmctld daemons:$popts' \
+    'reb*oot_nodes:reboot the nodes when they become idle:$popts $cmd_reboot' \
+    'rec*onfigure:re-read configuration files:$popts' \
+    'ch*eckpoint:perform a checkpoint operation on identified job or job step:$popts $cmd_checkpoint' \
+    'req*ueue:re-queue a batch job:$popts $jobid' \
+    'requeuehold:re-queue and hold a batch:$popts $jobid' \
+    'hold:prevent specified job from starting:$popts $joblist' \
+    {holdu,uhold}':place user hold on specified job:$popts $joblist' \
+    'rel*ease:permit specified job to start:$popts $joblist' \
+    'su*spend:susend specified job:$popts $joblist' \
+    'res*ume:resume previously suspended job:$popts $joblist' \
+    'to*p:Put specified job first in queue for user:$popts $jobid' \
+    'wa*it_job:wait until the nodes allocated to the job are booted and usable:$popts $jobid' \
+    'setdebugf*lags:add or remove slurmctld DebugFlags:$popts $cmd_setdebugflags' \
+    {fsd\*ampeningfactor,fai\*rsharedampeningfactor}:'Set the FairShareDampeningFactor in slurmctld:$popts $any' \
+    'se*tdebug:set slurmctld debug level:$popts $cmd_setdebug' \
+    'sch*edloglevel:set scheduler log level:$popts $cmd_schedloglevel' \
+    'sho*w:display state of identified entity:$popts $cmd_show' \
+    'write:Write config or the batch script for a given job:$popts $cmd_write' \
+    'takeover:ask slurm backup controller to take over:$popts' \
+    'shutdown:shutdown slurm daemons:$popts $cmd_shutdown' \
+    'u*pdate:update job, node, partition, reservation, or step:$popts $cmd_update' \
+    'd*elete:delete the specified partition or reservation:$popts $cmd_delete' \
+    'vers*ion:display tool version number:$popts' \
+    'l*istpids:List pids associated with the given jobid:$popts $jobid' \
+    'n*otify:send message to specified job:$popts $jobid $any "#"'
+  cmd=($reply)
+
+  _regex_arguments _scontrol $any $opts $cmd
+  _scontrol "$@"
+  return
+  ;;
+
+(sdiag)
+  _arguments -s -C \
+    {-a,--all}'[all statistics]' \
+    {-r,--reset}'[reset statistics]' \
+    {-M+,--cluster=}'[direct the request to a specific cluster]:cluster:_slurm_cluster' \
+    {-i,--sort-by-id}'[sort RPCs by id]' \
+    {-t,--sort-by-time}'[sort RPCs by total run time]' \
+    {-T,--sort-by-time2}'[sort RPCs by average run time]' \
+    {-V,--version}'[display current version number]' \
+    '--help[show this help message]' \
+    '--usage[display brief usage message]'
+  ;;
+
+(seff)
+  _arguments -s -C \
+    '-h[Help menu]' \
+    '-v[Version]' \
+    '-d[Debug mode: display raw Slurm data]' \
+    '1:Jobid:_slurm_job'
+  ;;
+
+(sgather)
+  _arguments -s -C \
+    {-C,--compress}'[compress the file being transmitted]' \
+    {-f,--force}'[ignore nonexistent source file]' \
+    {-F+,--fanout=}'[specify message fanout]:num: ' \
+    {-k,--keep}'[do not remove source file after transmission]' \
+    {-p,--preserve}'[preserve modes and times of source file]' \
+    {-r,--recursive}'[copy directories recursively]' \
+    {-t+,--timeout=}'[specify message timeout]:seconds: ' \
+    {-v,--verbose}'[provide detailed event logging]' \
+    {-V,--version}'[print version information and exit]' \
+    '--help[show this help message]' \
+    '--usage[display brief usage message]'
+  ;;
+
+(sinfo)
+  _arguments -s -C \
+    {-a,--all}'[show all partitions (including hidden and those not accessible)]' \
+    {-d,--dead}'[show only non-responding nodes]' \
+    {-e,--exact}'[group nodes only on exact match of configuration]' \
+    '(--local)--federation[Report federated information if a member of one]' \
+    {-h,--noheader}'[no headers on output]' \
+    '--hide[do not show hidden or non-accessible partitions]' \
+    {-i+,--iterate=}'[specify an iteration period]:seconds: ' \
+    '(--federation)--local[show only local cluster in a federation]' \
+    {-l,--long}'[long output - displays more information]' \
+    '(--local)'{-M+,--clusters=}'[clusters to issue commands to]:names:_sequence _slurm_cluster' \
+    {-n+,--nodes=}'[report on specific node(s)]:NODES:_sequence _slurm_node' \
+    '--noconvert[don''t convert units from their original type]' \
+    {-N,--Node}'[Node-centric format]' \
+    {-o+,--format=}'[format specification]:format: ' \
+    {-O+,--Format=}'[long format specification]:format:->sinfo-Format' \
+    {-p+,--partition=}'[report on specific partition]:partition:_slurm_partition' \
+    {-r,--responding}'[report only responding nodes]' \
+    {-R,--list-reasons}'[list reason nodes are down or drained]' \
+    {-s,--summarize}'[report state summary only]' \
+    {-S+,--sort=}'[comma separated list of fields to sort on]:fields: ' \
+    {-t+,--states=}'[specify the what states of nodes to view]:node_state:->node-state' \
+    {-T,--reservation}'[show only reservation information]' \
+    {-v,--verbose}'[verbosity level]' \
+    {-V,--version}'[output version information and exit]' \
+    '--help[show this help message]' \
+    '--usage[display brief usage message]'
+  ;;
+
+(sjobexitmod)
+  _arguments -C \
+    '-e+[Modify the derived exit code to new value.]:exit code: ' \
+    '-r+[Modify the job''s comment field to new value.]:reason string: ' \
+    '-c+[Name of cluster (optional).]:cluster:_slurm_cluster' \
+    '-l[List information for a completed job.]' \
+    '-h[Show usage.]' \
+    '1:JobId:_slurm_job' \
+    '-man[Show man page.]'
+  ;;
+
+(sjstat)
+  _arguments -C \
+    '-h[shows usage.]' \
+    '-c[shows computing resources info only.]' \
+    '-man[shows man page.]' \
+    '-r[show only running jobs.]' \
+    '-v[is for the verbose mode.]'
+  ;;
+
+(smap)
+  _arguments -s -C \
+    {-c,--commandline}'[output written with straight to the commandline]' \
+    {-D+,--display=}'[set which display mode to use]:mode:((j\:jobs r\:reservations s\:partitions)' \
+    {-h,--noheader}'[no headers on output]' \
+    {-H,--show_hidden}'[display hidden partitions and their jobs]' \
+    {-i+,--iterate=}'[specify an interation period]:seconds: ' \
+    {-M+,--cluster=}'[cluster to issue commands to]:cluster_name:_slurm_cluster' \
+    {-n,--nodes=}'[only show objects with these nodes]:nodes:_sequence _slurm_node' \
+    {-V,--version}'[output version information and exit]' \
+    '--help[show this help message]' \
+    '--usage[display brief usage message]'
+  ;;
+
+(sprio)
+  _arguments -s -C \
+    '--federation[display jobs in federation if a member of one]' \
+    {-h,--noheader}'[no headers on output]' \
+    {-j+,--jobs=}'[comma separated list of jobs to view, default is all]:list:_sequence _slurm_job' \
+    '--local[display jobs on local cluster only]' \
+    {-l,--long}'[long report]' \
+    {-M+,--cluster=}'[cluster to issue commands to]: :_slurm_cluster' \
+    {-n,--norm}'[display normalized values]' \
+    {-o+,--format=}'[format specification]:format: ' \
+    '--sibling[display job records separately for each federation cluster]' \
+    {-p+,--partition=}'[comma separated list of partitions]:partition_name:_sequence _slurm_partition' \
+    {-u+,--user=}'[comma separated list of users to view]:user_name:_sequence _slurm_user' \
+    {-v,--verbose}'[verbosity level]' \
+    {-V,--version}'[output version information and exit]' \
+    {-w,--weights}'[show the weights for each priority factor]' \
+    '--help[show this help message]' \
+    '--usage[display a brief summary of sprio options]'
+  ;;
+
+(squeue)
+  _arguments -s -C \
+    {-A+,--account=}'[comma separated list of accounts to view]:account(s):_sequence _slurm_account' \
+    {-a,--all}'[display jobs in hidden partitions]' \
+    '--array-unique[display one unique pending job array element per line]' \
+    '--federation[Report federated information if a member of one]' \
+    {-h,--noheader}'[no headers on output]' \
+    '--hide[do not display jobs in hidden partitions]' \
+    {-i+,--iterate=}'[specify an interation period]:seconds: ' \
+    {-j+,--job=}'[comma separated list of jobs IDs to view]:job(s):_sequence _slurm_job' \
+    '--local[Report information only about jobs on the local cluster]' \
+    {-l,--long}'[long report]' \
+    {-L+,--licenses=}'[comma separated list of license names to view]:license names:_sequence _slurm_licenses' \
+    {-M+,--clusters=}'[cluster to issue commands to]:cluster_name:_slurm_cluster' \
+    {-n+,--name=}'[comma separated list of job names to view]:job name(s): ' \
+    '--noconvert[don''t convert units from their original type]' \
+    {-o+,--format=}'[format specification]:format: ' \
+    {-O+,--Format=}'[format specification]:format:->squeue-format' \
+    {-p+,--partition=}'[comma separated list of partitions to view, default is all partitions]:partition(s):_sequence _slurm_partition' \
+    {-q+,--qos=}'[comma separated list of qos''s to view]:qos(s):_sequence _slurm_qos' \
+    {-R+,--reservation=}'[reservation to view, default is all]:name:_sequence _slurm_reservation' \
+    {-r,--array}'[display one job array element per line]' \
+    '--sibling[Report information about all sibling jobs on a federated cluster]' \
+    {-s+,--step=}'[comma separated list of job steps to view]:step(s): ' \
+    {-S+,--sort=}'[comma separated list of fields to sort on]:fields: ' \
+    '--start[print expected start times of pending jobs]' \
+    {-t+,--states=}'[comma separated list of states to view]:states:->squeue-states' \
+    {-u+,--user=}'[comma separated list of users to view]:user_name(s):_sequence _slurm_user' \
+    {-v,--verbose}'[verbosity level]' \
+    {-V,--version}'[output version information and exit]' \
+    {-w+,--nodelist=}'[list of nodes to view, default is all nodes]:hostlist:_sequence _slurm_node' \
+    '--help[show this help message]' \
+    '--usage[display a brief summary of squeue options]' \
+  ;;
+
+(sreport)
+  local -a reply
+  local any=$'/[^\0]#\0/'
+
+  local -a time_format
+  time_format=($any ':time_format:time_format:(Second Minute Hour Percent SecPer MinPer HourPer)')
+
+  local -a opts popts
+  _regex_words option options \
+    {-a,--all_clusters}':Use all clusters instead of current' \
+    '--federation:Generate reports for the federation if a member of one' \
+    {-h,--help}':equivalent to \"help\" command' \
+    '--local:Report local cluster, even when in federation of clusters' \
+    {-n,--noheader}':equivalent to \"noheader\" command' \
+    {-p,--parsable}':output will be ''|'' delimited with a ''|'' at the end' \
+    {-P,--parsable2}':output will be ''|'' delimited without a ''|'' at the end' \
+    {-Q,--quiet}':equivalent to \"quiet\" command' \
+    '-t:time_format:$time_format' \
+    {-T,--tres}':comma separated list of TRES, or ''ALL'' for all TRES:$any' \
+    {-v,--verbose}':equivalent to \"verbose\" command' \
+    {-V,--version}':equivalent to \"version\" command'
+  opts=($reply '#')
+  # opts that can be put anywhere -- really same as $opts but it makes completion options too messsy:
+  popts=()
+
+  local -a cluster_report
+  cluster_report=($any ':cluster_report:cluster_report:(
+    AccountUtilizationByUser UserUtilizationByAccount
+    UserUtilizationByWckey Utilization WCKeyUtilizationByUser)')
+
+  local -a job_report
+  job_report=($any ':job_report:job_report:(
+    SizesByAccount SizesByAccountAndWckey SizesByWckey)')
+
+  local -a reservation_report
+  reservation_report=($any ':reservation_report:reservation_report:(Utilization)')
+
+  local -a user_report
+  user_report=($any ':user_report:user_report:(TopUsage)')
+
+  local -a common_options
+  common_options=(
+    'All_Clusters[Use all monitored clusters]'
+    'Clusters[List of clusters to include in report]:OPT:_sequence _slurm_cluster'
+    'End[Period ending for report]:OPT: '
+    'Format[Comma separated list of fields to display in report]:OPT:_values -s ,
+      Accounts Cluster Count Login Proper Used
+      Cluster Count Login Proper Used Wckey
+      Allocated Cluster Count Down Idle Overcommited PlannedDown Reported Reserved
+      Account Cluster
+      Allocated Associations Cluster Count CPUTime End Flags Idle Name Nodes ReservationId Start TotalTime
+      Account Cluster Login Proper Used'
+    'Start[Period start for report]:OPT: '
+  )
+
+  local -a cluster_options
+  cluster_options=($any ':cluster_options:cluster_options:'"$(_slurm_regexi_values -S = cluster_options \
+    $common_options \
+    'Accounts[List of accounts to include in report]:OPT:_sequence _slurm_account' \
+    'Tree[report will span the accounts as they in the hierarchy]' \
+    'Users[List of users to include in report]:OPT:_sequence _slurm_user' \
+    'Wckeys[List of wckeys to include in report]:OPT:_sequence _slurm_wckey' \
+  )" '#')
+
+  local -a job_options
+  job_options=($any ':job_options:job_options:'"$(_slurm_regexi_values -S = job_options \
+    $common_options \
+    'Accounts[List of accounts to use for the report]:OPT:_sequence _slurm_account' \
+    'AcctAsParent[take specified accounts as parents and the next layer of accounts under those specified will be displayed]' \
+    'FlatView[will not group accounts in a hierarchical level, but print each account where jobs ran on a separate line without any hierarchy]' \
+    'GID[List of group ids to include in report]:OPT:_sequence _groups' \
+    'Grouping[Comma separated list of size groupings]:OPT:(individual)' \
+    'Jobs[List of jobs/steps to include in report]:OPT:_sequence _slurm_job' \
+    'Nodes[Only show jobs that ran on these nodes]:OPT:_sequence _slurm_node' \
+    'Partitions[List of partitions jobs ran on to include in report]:OPT:_sequence _slurm_partition' \
+    'PrintJobCount[print number of jobs ran instead of time used]' \
+    'Users[List of users jobs to include in report]:_sequence _slurm_user' \
+    'Wckeys[List of wckeys to use for the report]:_sequence _slurm_wckeys' \
+  )" '#')
+
+  local -a reservation_options
+  reservation_options=($any ':reservation_options:reservation_options:'"$(_slurm_regexi_values -S = reservation_options \
+    $common_options \
+    'Names[List of reservations to use for the report]:OPT:_sequence _slurm_reservation' \
+    'Nodes[Only show reservations that used these nodes]:OPT:_sequence _slurm_node' \
+  )" '#')
+
+  local -a user_options
+  user_options=($any ':user_options:user_options:'"$(_slurm_regexi_values -S = user_options \
+    $common_options \
+    'Accounts[List of accounts to use for the report]:OPT:_sequence _slurm_account' \
+    'Group[Group all accounts together for each user]' \
+    'TopCount[Change the number of users displayed]:OPT: ' \
+    'Users[List of users jobs to include in report]:OPT:_sequence _slurm_user' \
+  )" '#')
+
+  local -a cmd
+  _regex_words command command \
+    'help:Print this description of use' \
+    'cluster: :$cluster_report $popt $cluster_options' \
+    'job: :$job_report $popt $job_options' \
+    'user: :$user_report $popt $user_options' \
+    'reservation: :$reservation_report $popt $reservation_options'
+  cmd=($reply)
+
+  _regex_arguments _sreport $any $opts $cmd
+  _sreport "$@"
+  return
+  ;;
+
+(srun)
+  _arguments -s -C \
+    $common_options \
+    '--bcast=[Copy executable file to compute nodes]::dest_path:_files' \
+    '--checkpoint=[job step checkpoint interval]:time: ' \
+    '--compress=[data compression library used with --bcast]::library:(lz4 zlib)' \
+    '--export=[environment variables passed to launcher with optional values]:env_vars|NONE:->export' \
+    {-e+,--error=}'[location of stderr redirection]:err: ' \
+    '--epilog=[run \"program\" after launching job step]:program:_absolute_command_paths' \
+    {-E,--preserve-env}'[env vars for node and task counts override command-line flags]' \
+    {-i+,--input=}'[location of stdin redirection]:in:_files' \
+    {-I-,--immediate=}'[exit if resources not available in \"secs\"]::secs: ' \
+    '--jobid=[run under already allocated job]:id:_slurm_job' \
+    {-K,--kill-on-bad-exit}'[kill the job if any task terminates with a non-zero exit code]' \
+    {-l,--label}'[prepend task number to lines of stdout/err]' \
+    '--mpi=[type of MPI being used]:type:(list openmpi pmi2 mpix none)' \
+    '--multi-prog[if set the program name specified is the configuration specification for multiple programs]' \
+    {-o+,--output=}'[location of stdout redirection]:out:_files' \
+    '--open-mode=[mode to open the output and error files]:append|truncate:(append truncate)' \
+    '--pack-group=[pack job allocation(s) in which to launch application]:value: ' \
+    '--prolog=[run \"program\" before launching job step]:program:_absolute_command_pats' \
+    '--propagate=[propagate all \[or specific list of\] rlimits]::rlimits:->rlimits' \
+    '--pty[run task zero in pseudo terminal]' \
+    '--quit-on-interrupt[quit on single Ctrl-C]' \
+    {-r+,--relative=}'[run job step relative to node n of allocation]:n: ' \
+    '--restart-dir=[directory of checkpoint image files to restart from]:dir:_directories' \
+    '--slurmd-debug=[slurmd debug level]:level:(quiet fatal error info verbose)' \
+    '--task-epilog=[run \"program\" after launching task]:program:_absolute_command_paths' \
+    '--task-prolog=[run \"program\" before launching task]:program:_absolute_command_paths' \
+    {-T+,--threads=}'[set srun launch fanout]:threads: ' \
+    {-u,--unbuffered}'[do not line-buffer stdout/err]' \
+    {-W+,--wait=}'[seconds to wait after first task exits before killing job]:sec: ' \
+    {-X,--disable-status}'[Disable Ctrl-C status feature]' \
+    {-Z,--no-allocate}'[don''t allocate nodes (must supply -w)]' \
+    '--resv-ports=[reserve communication ports]::count: ' \
+    {--cpu-bind=,--cpu_bind=}'[Bind tasks to CPUs]:type:->cpu-bind' \
+    '--test-only[Return an estimate of when a job would be scheduled to run]' \
+    '--accel-bind=[Control how tasks are bound to generic resources of type gpu, mic and nic]:options:->accel-bind' \
+    '--msg-timeout=[Modify the job launch message timeout]:seconds: ' \
+    '--x11=[Sets up X11 forwarding on all, first or last node(s) of the allocation]::all|first|last:(all first last)'
+  ;;
+
+(sshare)
+  _arguments -s -C \
+    {-a,--all}'[list all users]' \
+    {-A+,--accounts=}'[display specific accounts (comma separated list)]:accounts:_sequence _slurm_account' \
+    {-e,--helpformat}'[Print a list of fields that can be specified with the ''--format'' option]' \
+    {-l,--long}'[include normalized usage in output]' \
+    {-m,--partition}'[print the partition part of the association]' \
+    {-M+,--cluster=}'[clusters to issue commands to.]:names:_sequence _slurm_cluster' \
+    {-n,--noheader}'[omit header from output]' \
+    {-o+,--format=}'[Comma separated list of fields]:format:->sshare-format' \
+    {-p,--parsable}'[''|'' delimited output with a trailing ''|'']' \
+    {-P,--parsable2}'[''|'' delimited output without a trailing ''|'']' \
+    {-u+,--users=}'[display specific users]:users:_sequence _slurm_user' \
+    {-U,--Users}'[display only user information]' \
+    {-v,--verbose}'[display more information]' \
+    {-V,--version}'[display tool version number]' \
+    '--help[display this usage description]' \
+    '--usage[display this usage description]'
+  ;;
+
+(sstat)
+  _arguments -s -C \
+    {-a,--allsteps}'[Print all steps for the given job(s) when no step is specified.]' \
+    {-e,--helpformat}'[Print a list of fields that can be specified with the ''--format'' option]' \
+    {-h,--help}'[Print this description of use.]' \
+    {-i,--pidformat}'[Predefined format to list the pids running for each job step.]' \
+    {-j+,--jobs=}'[Stat this job step or comma-separated list of job steps.]:job(.step):_sequence _slurm_job' \
+    {-n,--noheader}'[No header will be added to the beginning of output.]' \
+    '--noconvert[Don''t convert units from their original type.]' \
+    {-o+,--format=}'[Comma separated list of fields.]:fields:->sstat-format' \
+    {-p,--parsable}'[output will be ''|'' delimited with a ''|'' at the end]' \
+    {-P,--parsable2}'[output will be ''|'' delimited without a ''|'' at the end]' \
+    '--usage[Display brief usage message.]' \
+    {-v,--verbose}'[Primarily for debugging purposes, report the state of various variables during processing.]' \
+    {-V,--version}'[Print version.]'
+  # TODO: only user's jobs
+  ;;
+
+(strigger)
+  _arguments -s -C \
+    '(--get --clear)--set[create a trigger]' \
+    '(--set --clear)--get[get trigger information]' \
+    '(--set --get)--clear[delete a trigger]' \
+    '--burst_buffer[trigger event on burst buffer error]' \
+    '--front_end[trigger event on FrontEnd node state changes]' \
+    {-a,--primary_slurmctld_failure}'[trigger event when primary slurmctld fails]' \
+    {-A,--primary_slurmctld_resumed_operation}'[trigger event on primary slurmctld resumed operation after failure]' \
+    {-b,--primary_slurmctld_resumed_control}'[trigger event on primary slurmctld resumed control]' \
+    {-B,--backup_slurmctld_failure}'[trigger event when backup slurmctld fails]' \
+    {-c,--backup_slurmctld_resumed_operation}'[trigger event when backup slurmctld resumed operation after failure]' \
+    {-C,--backup_slurmctld_assumed_control}'[trigger event when backup slurmctld assumed control]' \
+    {-d,--down}'[trigger event when node goes DOWN]' \
+    {-D,--drained}'[trigger event when node becomes DRAINED]' \
+    {-e,--primary_slurmctld_acct_buffer_full}'[trigger event when primary slurmctld acct buffer full]' \
+    {-F,--fail}'[trigger event when node is expected to FAIL]' \
+    {-f,--fini}'[trigger event when job finishes]' \
+    '--flags=[trigger event flag]:perm:(perm)' \
+    {-g,--primary_slurmdbd_failure}'[trigger when primary slurmdbd fails]' \
+    {-G,--primary_slurmdbd_resumed_operation}'[trigger when primary slurmdbd resumed operation after failure]' \
+    {-h,--primary_database_failure}'[trigger when primary database fails]' \
+    {-H,--primary_database_resumed_operation}'[trigger when primary database resumed operation after failure]' \
+    {-i+,--id=}'[a trigger''s ID number]:#: ' \
+    {-I,--idle}'[trigger event when node remains IDLE]' \
+    {-j+,--jobid=}'[trigger related to specific jobid]:#:_slurm_job' \
+    {-M+,--cluster=,--clusters=}'[cluster to issue commands to]:name:_slurm_cluster' \
+    {-n+,--node=}'[trigger related to specific node, all nodes by default]::host:_slurm_node' \
+    {-N,--noheader}'[Do not print the message header]' \
+    {-o+,--offset=}'[trigger''s offset time from event, negative to precede]:#: ' \
+    {-p+,--program=}'[pathname of program to execute when triggered]:path:_absolute_command_paths' \
+    {-Q,--quiet}'[quiet mode (suppress informational messages)]' \
+    {-r,--reconfig}'[trigger event on configuration changes]' \
+    {-t,--time}'[trigger event on job''s time limit]' \
+    {-u,--up}'[trigger event when node returned to service from DOWN state]' \
+    '--user=[a user name or ID to filter triggers by]:user:_slurm_user' \
+    {-v,--verbose}'[print detailed event logging]' \
+    {-V,--version}'[print version information and exit]' \
+    '--help[show this help message]' \
+    '--usage[display brief usage message]'
+  ;;
+
+esac
+
+case $state in
+  (accel-bind)
+    _values -s '' accel-bind \
+      'g[Bind each task to GPUs which are closest to the allocated CPUs]' \
+      'm[Bind each task to MICs which are closest to the allocated CPUs]' \
+      'n[Bind each task to NICs which are closest to the allocated CPUs]' \
+      'v[Verbose mode. Log how tasks are bound to GPU and NIC devices]'
+    ;;
+  (acctg-freq)
+    _values -s , -S = accounting \
+      'task[task profiling]:interval: ' \
+      'energy[energy profiling]:interval: ' \
+      'network[infiniband profiling]:interval: ' \
+      'filesystem[filesystem profiling]:interval: '
+    ;;
+  (clusters)
+    _alternative 'all:all clusters:(all)' 'name:cluster:_sequence _slurm_cluster'
+    ;;
+  (cpu-bind)
+    _values -s , -S: cpu-bind \
+      '(q quiet v verbose)'{q,quiet}'[quietly bind before task runs (default)]' \
+      '(q quiet v verbose)'{v,verbose}'[verbosely report binding before task runs]' \
+      {no,none}'[don''t bind tasks to CPUs (default)]' \
+      'rank[bind by task rank]' \
+      'map_cpu[specify a CPU ID binding for each task]:list: ' \
+      'mask_cpu[specify a CPU ID binding mask for each task]:list: ' \
+      'rank_ldom[bind task by rank to CPUs in a NUMA locality domain]' \
+      'map_ldom[specify a NUMA locality domain ID for each task]:list: ' \
+      'mask_ldom[specify a NUMA locality domain ID mask for each task]:list: ' \
+      'sockets[auto-generated masks bind to sockets]' \
+      'cores[auto-generated masks bind to cores]' \
+      'threads[auto-generated masks bind to threads]' \
+      'ldoms[auto-generated masks bind to NUMA locality domains]' \
+      'boards[auto-generated masks bind to boards]' \
+      '(*)help[show this help message]'
+    ;;
+  (dependency)
+    # FIXME: -s [,?]
+    _values -s , -S : dependency \
+      'after[This job can begin execution after the specified jobs have begun execution]:job_ids:_sequence -s \: _slurm_job' \
+      'afterany[This job can begin execution after the specified jobs have terminated.]:job_ids:_sequence -s \: _slurm_job' \
+      'afterburstbuffer[This job can begin execution after the specified jobs have terminated and any associated burst buffer stage out operations have completed.]:job_ids:_sequence -s \: _slurm_job' \
+      'aftercorr[A task of this job array can begin execution after the corresponding task ID in the specified job has completed successfully (ran to completion with an exit code of zero).]:job_ids:_sequence -s \: _slurm_job' \
+      'afternotok[This job can begin execution after the specified jobs have terminated in some failed state (non-zero exit code, node failure, timed out, etc).]:job_ids:_sequence -s \: _slurm_job' \
+      'afterok[This job can begin execution after the specified jobs have successfully executed (ran to completion with an exit code of zero).]:job_ids:_sequence -s \: _slurm_job' \
+      'expand[Resources allocated to this job should be used to expand the specified job.]:job_id:_slurm_job' \
+      'singleton[This job can begin execution after any previously launched jobs sharing the same job name and user have terminated.]'
+    ;;
+  (export)
+    _sequence _alternative \
+      'all-none:all or none:(ALL NONE)' \
+      'env:environment variable:_parameters -g "*export*"'
+    ;;
+  (hint)
+    _values hint \
+      'compute_bound[use all cores in each socket]' \
+      'memory_bound[use only one core in each socket]' \
+      'multithread[use extra threads with in-core multi-threading]' \
+      'nomultithread[don''t use extra threads with in-core multi-threading]' \
+      'help[show this help message]'
+    ;;
+  (job-state)
+    local -A states
+    local -a args
+    local s l
+    states=(
+      r running
+      cd completed
+      f failed
+      to timeout
+      rs resizing
+      dl deadline
+      nf node_fail
+    )
+    for s l in ${(kv)states} ; do
+      args+=("($s $l)$s"'['$l']' "($s $l)$l"'['$l']')
+    done
+    _values -s , 'states' $args
+    ;;
+  (mail-type)
+    _values -s , type '(*)NONE' BEGIN END FAIL REQUEUE \
+      '(BEGIN END FAIL REQUEUE STAGE_OUT)ALL[equivalent to BEGIN,END,FAIL,REQUEUE,STAGE_OUT]' \
+      'STAGE_OUT[burst buffer stage out and teardown completed]' \
+      TIME_LIMIT \
+      'TIME_LIMIT_90[reached 90 percent of time limit]' \
+      'TIME_LIMIT_80[reached 80 percent of time limit]' \
+      'TIME_LIMIT_50[reached 50 percent of time limit]'
+    ;;
+  (mem-bind)
+    _values -s , -S : mem-bind \
+      '(sort)nosort[avoid sorting pages at startup]' \
+      '(nosort)sort[sort pages at startup]' \
+      '(q quiet v verbose)'{q,quiet}'[quietly bind before task runs (default)]' \
+      '(q quiet v verbose)'{v,verbose}'[verbosely report binding before task runs]' \
+      {no,none}'[don''t bind tasks to memory (default)]' \
+      'rank[bind by task rank]' \
+      'local[bind to memory local to processor]' \
+      'map_mem[specify a memory binding for each task]:list: ' \
+      'mask_mem[specify a memory binding mask for each tasks]:list: ' \
+      '(*)help[show this help message]'
+    ;;
+  (node-state)
+    # TODO: case-insensitive
+    _values -s , node_state \
+      ALLOC ALLOCATED \
+      COMP COMPLETING \
+      DOWN \
+      'DRAIN[DRAINING or DRAINED]' \
+      DRAINED \
+      DRAINING \
+      FAIL \
+      FUTURE FUTR \
+      IDLE \
+      MAINT \
+      MIX MIXED \
+      NO_RESPOND \
+      NPC \
+      PERFCTRS \
+      POWER_DOWN \
+      POWER_UP \
+      RESV RESERVED \
+      UNK UNKNOWN
+    ;;
+  (profile)
+    _values -s , profile '(*)all' '(*)none' energy lustre network task
+    ;;
+  (rlimits)
+    _values -s , rlimits \
+      '(*)ALL[All limits listed below (default)]' \
+      '(*)NONE[No limits listed below]' \
+      'AS[The maximum address space for a process]' \
+      'CORE[The maximum size of core file]' \
+      'CPU[The maximum amount of CPU time]' \
+      'DATA[The maximum size of a process''s data segment]' \
+      'FSIZE[The maximum size of files created]' \
+      'MEMLOCK[The maximum size that may be locked into memory]' \
+      'NOFILE[The maximum number of open files]' \
+      'NPROC[The maximum number of processes available]' \
+      'RSS[The maximum resident set size]' \
+      'STACK[The maximum stack size]'
+    ;;
+  (sacct-format)
+    _values -s , 'format' $(sacct -e)
+    ;;
+  (sinfo-Format)
+    _values -s , -S : 'format' \
+      'all[Print all fields available in the -o format for this data type with a vertical bar separating each field.]' \
+      'allocmem[Prints the amount of allocated memory on a node.]::[.]size: ' \
+      'allocnodes[Allowed allocating nodes.]::[.]size: ' \
+      'available[State/availability of a partition.]::[.]size: ' \
+      'cluster[Print the cluster name if running in a federation]::[.]size: ' \
+      'cpus[Number of CPUs per node.]::[.]size: ' \
+      'cpusload[CPU load of a node.]::[.]size: ' \
+      'freemem[Free memory of a node.]::[.]size: ' \
+      'cpusstate[Number of CPUs by state in the format "allocated/idle/other/total".]::[.]size: ' \
+      'cores[Number of cores per socket.]::[.]size: ' \
+      'defaulttime[Default time for any job in the format "days-hours:minutes:seconds".]::[.]size: ' \
+      'disk[Size of temporary disk space per node in megabytes.]::[.]size: ' \
+      'features[Features available on the nodes. Also see features_act.]::[.]size: ' \
+      'features_act[Features currently active on the nodes. Also see features.]::[.]size: ' \
+      'groups[Groups which may use the nodes.]::[.]size: ' \
+      'gres[Generic resources (gres) associated with the nodes.]::[.]size: ' \
+      'maxcpuspernode[The max number of CPUs per node available to jobs in the partition.]::[.]size: ' \
+      'memory[Size of memory per node in megabytes.]::[.]size: ' \
+      'nodes[Number of nodes.]::[.]size: ' \
+      'nodeaddr[List of node communication addresses.]::[.]size: ' \
+      'nodeai[Number of nodes by state in the format "allocated/idle".]::[.]size: ' \
+      'nodeaiot[Number of nodes by state in the format "allocated/idle/other/total".]::[.]size: ' \
+      'nodehost[List of node hostnames.]::[.]size: ' \
+      'nodelist[List of node names.]::[.]size: ' \
+      'oversubscribe[Jobs may oversubscribe compute resources (i.e. CPUs), "yes", "no", "exclusive" or "force".]::[.]size: ' \
+      'partition[Partition name followed by "*" for the default partition, also see %R.]::[.]size: ' \
+      'partitionname[Partition name, also see %P.]::[.]size: ' \
+      'port[Node TCP port.]::[.]size: ' \
+      'preemptmode[PreemptionMode.]::[.]size: ' \
+      'priorityjobfactor[Partition factor used by priority/multifactor plugin in calculating job priority.]::[.]size: ' \
+      {prioritytier,priority}'[Partition scheduling tier priority.]::[.]size: ' \
+      'reason[The reason a node is unavailable (down, drained, or draining states).]::[.]size: ' \
+      'root[Only user root may initiate jobs, "yes" or "no".]::[.]size: ' \
+      'size[Maximum job size in nodes.]::[.]size: ' \
+      'statecompact[State of nodes, compact form.]::[.]size: ' \
+      'statelong[State of nodes, extended form.]::[.]size: ' \
+      'sockets[Number of sockets per node.]::[.]size: ' \
+      'socketcorethread[Extended processor information: number of sockets, cores, threads (S:C:T) per node.]::[.]size: ' \
+      'time[Maximum time for any job in the format "days-hours:minutes:seconds".]::[.]size: ' \
+      'timestamp[Print the timestamp of the reason a node is unavailable.]::[.]size: ' \
+      'threads[Number of threads per core.]::[.]size: ' \
+      'user[Print the user name of who set the reason a node is unavailable.]::[.]size: ' \
+      'userlong[Print the user name and uid of who set the reason a node is unavailable.]::[.]size: ' \
+      'version[Print the version of the running slurmd daemon.]::[.]size: ' \
+      'weight[Scheduling weight of the nodes.]::[.]size: '
+    ;;
+  (squeue-format)
+    _values -s , -S : 'format' \
+      'account[Print the account associated with the job.]::[.]size: ' \
+      'accruetime[Print the accrue time associated with the job.]::[.]size: ' \
+      'admin_comment[Administrator comment associated with the job.]::[.]size: ' \
+      'allocnodes[Print the nodes allocated to the job.]::[.]size: ' \
+      'allocsid[Print the session ID used to submit the job.]::[.]size: ' \
+      'arrayjobid[Prints the job ID of the job array.]::[.]size: ' \
+      'arraytaskid[Prints the task ID of the job array.]::[.]size: ' \
+      'associd[Prints the id of the job association.]::[.]size: ' \
+      'batchflag[Prints whether the batch flag has been set.]::[.]size: ' \
+      'batchhost[Executing (batch) host.]::[.]size: ' \
+      'boardspernode[Prints the number of boards per node allocated to the job.]::[.]size: ' \
+      'burstbuffer[Burst Buffer specification]::[.]size: ' \
+      'burstbufferstate[Burst Buffer state]::[.]size: ' \
+      'chptdir[Prints the directory where the job checkpoint will be written to.]::[.]size: ' \
+      'chptinter[Prints the time interval of the checkpoint.]::[.]size: ' \
+      'cluster[Name of the cluster that is running the job or job step.]::[.]size: ' \
+      'clusterfeature[Cluster features required by the job.]::[.]size: ' \
+      'command[The command to be executed.]::[.]size: ' \
+      'comment[Comment associated with the job.]::[.]size: ' \
+      'contiguous[Are contiguous nodes requested by the job.]::[.]size: ' \
+      'cores[Number of cores per socket requested by the job.]::[.]size: ' \
+      'corespec[Count of cores reserved on each node for system use (core specialization).]::[.]size: ' \
+      'cpufreq[Prints the frequency of the allocated CPUs.]::[.]size: ' \
+      'cpus-per-task[Prints the number of CPUs per tasks allocated to the job.]::[.]size: ' \
+      'cpus-per-tres[Print the memory required per trackable resources allocated to the job or job step.]::[.]size: ' \
+      'deadline[Prints the deadline affected to the job]::[.]size: ' \
+      'dependency[Job dependencies remaining.]::[.]size: ' \
+      'delayboot[Delay boot time.]::[.]size: ' \
+      'derivedec[Derived exit code for the job, which is the highest exit code of any job step.]::[.]size: ' \
+      'eligibletime[Time the job is eligible for running.]::[.]size: ' \
+      'endtime[The time of job termination, actual or expected.]::[.]size: ' \
+      'exit_code[The exit code for the job.]::[.]size: ' \
+      'feature[Features required by the job.]::[.]size: ' \
+      'groupid[Group ID of the job.]::[.]size: ' \
+      'groupname[Group name of the job.]::[.]size: ' \
+      'jobarrayid[Job array''s job ID. This is the base job ID.]::[.]size: ' \
+      'jobid[Job id.]::[.]size: ' \
+      'lastschedeval[Prints the last time the job was evaluated for scheduling.]::[.]size: ' \
+      'licenses[Licenses reserved for the job.]::[.]size: ' \
+      'maxcpus[Prints the max number of CPUs allocated to the job.]::[.]size: ' \
+      'maxnodes[Prints the max number of nodes allocated to the job.]::[.]size: ' \
+      'mcslabel[Prints the MCS_label of the job.]::[.]size: ' \
+      'mem-per-tres[Print the memory (in MB) required per trackable resources allocated to the job or job step.]::[.]size: ' \
+      'minmemory[Minimum size of memory (in MB) requested by the job.]::[.]size: ' \
+      'mintime[Minimum time limit of the job]::[.]size: ' \
+      'mintmpdisk[Minimum size of temporary disk space (in MB) requested by the job.]::[.]size: ' \
+      'mincpus[Minimum number of CPUs (processors) per node requested by the job.]::[.]size: ' \
+      'name[Job or job step name.]::[.]size: ' \
+      'network[The network that the job is running on.]::[.]size: ' \
+      'nice[Nice value (adjustment to a job''s scheduling priority).]::[.]size: ' \
+      'nodes[List of nodes allocated to the job or job step.]::[.]size: ' \
+      'nodelist[List of nodes allocated to the job or job step.]::[.]size: ' \
+      'ntperboard[The number of tasks per board allocated to the job.]::[.]size: ' \
+      'ntpercore[The number of tasks per core allocated to the job.]::[.]size: ' \
+      'ntpernode[The number of task per node allocated to the job.]::[.]size: ' \
+      'ntpersocket[The number of tasks per socket allocated to the job.]::[.]size: ' \
+      'numcpus[Number of CPUs (processors) requested by the job or allocated to it if already running.]::[.]size: ' \
+      'numnodes[Number of nodes allocated to the job or the minimum number of nodes required by a pending job.]::[.]size: ' \
+      'numtasks[Number of tasks requested by a job or job step.]::[.]size: ' \
+      'origin[Cluster name where federated job originated from.]::[.]size: ' \
+      'originraw[Cluster ID where federated job originated from.]::[.]size: ' \
+      'oversubscribe[Can the compute resources allocated to the job be over subscribed by other jobs.]::[.]size: ' \
+      'packjobid[Job ID of the heterogeneous job leader.]::[.]size: ' \
+      'packjoboffset[Zero origin offset within a collection of heterogeneous jobs.]::[.]size: ' \
+      'packjobidset[Expression identifying all job IDs within a heterogeneous job.]::[.]size: ' \
+      'partition[Partition of the job or job step.]::[.]size: ' \
+      'priority[Priority of the job (converted to a floating point number between 0.0 and 1.0).]::[.]size: ' \
+      'prioritylong[Priority of the job (generally a very large unsigned integer).]::[.]size: ' \
+      'profile[Profile of the job.]::[.]size: ' \
+      'preemptime[The preempt time for the job.]::[.]size: ' \
+      'qos[Quality of service associated with the job.]::[.]size: ' \
+      'reason[The reason a job is in its current state.]::[.]size: ' \
+      'reasonlist[For pending jobs: the reason a job is waiting for execution.]::[.]size: ' \
+      'reboot[Indicates if the allocated nodes should be rebooted before starting the job.]::[.]size: ' \
+      'reqnodes[List of node names explicitly requested by the job.]::[.]size: ' \
+      'reqswitch[The max number of requested switches by for the job.]::[.]size: ' \
+      'requeue[Prints whether the job will be requeued on failure.]::[.]size: ' \
+      'reservation[Reservation for the job.]::[.]size: ' \
+      'resizetime[The amount of time changed for the job to run.]::[.]size: ' \
+      'restartcnt[The number of checkpoint restarts for the job.]::[.]size: ' \
+      'resvport[Reserved ports of the job.]::[.]size: ' \
+      'schednodes[For pending jobs, a list of the nodes expected to be used when the job is started.]::[.]size: ' \
+      'sct[Number of requested sockets, cores, and threads (S:C:T) per node for the job.]::[.]size: ' \
+      'selectjobinfo[Node selection plugin specific data for a job.]::[.]size: ' \
+      'siblingsactive[Cluster names of where federated sibling jobs exist.]::[.]size: ' \
+      'siblingsactiveraw[Cluster IDs of where federated sibling jobs exist.]::[.]size: ' \
+      'siblingsviable[Cluster names of where federated sibling jobs are viable to run.]::[.]size: ' \
+      'siblingsviableraw[Cluster IDs of where federated sibling jobs viable to run.]::[.]size: ' \
+      'sockets[Number of sockets per node requested by the job.]::[.]size: ' \
+      'sperboard[Number of sockets per board allocated to the job.]::[.]size: ' \
+      'starttime[Actual or expected start time of the job or job step.]::[.]size: ' \
+      'state[Job state in extended form.]::[.]size: ' \
+      'statecompact[Job state in compact form.]::[.]size: ' \
+      'stderr[The directory for standard error to output to.]::[.]size: ' \
+      'stdin[The directory for standard in.]::[.]size: ' \
+      'stdout[The directory for standard out to output to.]::[.]size: ' \
+      'stepid[Job or job step id.]::[.]size: ' \
+      'stepname[job step name.]::[.]size: ' \
+      'stepstate[The state of the job step.]::[.]size: ' \
+      'submittime[The time that the job was submitted at.]::[.]size: ' \
+      'system_comment[System comment associated with the job.]::[.]size: ' \
+      'threads[Number of threads per core requested by the job.]::[.]size: ' \
+      'timeleft[Time left for the job to execute in days-hours:minutes:seconds.]::[.]size: ' \
+      'timelimit[Timelimit for the job or job step.]::[.]size: ' \
+      'timeused[Time used by the job or job step in days-hours:minutes:seconds.]::[.]size: ' \
+      'tres-alloc[Print the trackable resources allocated to the job if running.]::[.]size: ' \
+      'tres-bind[Print the trackable resources task binding requested by the job or job step.]::[.]size: ' \
+      'tres-freq[Print the trackable resources frequencies requested by the job or job step.]::[.]size: ' \
+      'tres-per-job[Print the trackable resources requested by the job.]::[.]size: ' \
+      'tres-per-node[Print the trackable resources per node requested by the job or job step.]::[.]size: ' \
+      'tres-per-socket[Print the trackable resources per socket requested by the job or job step.]::[.]size: ' \
+      'tres-per-step[Print the trackable resources requested by the job step.]::[.]size: ' \
+      'tres-per-task[Print the trackable resources per task requested by the job or job step.]::[.]size: ' \
+      'userid[User ID for a job or job step.]::[.]size: ' \
+      'username[User name for a job or job step.]::[.]size: ' \
+      'wait4switch[The amount of time to wait for the desired number of switches.]::[.]size: ' \
+      'wckey[Workload Characterization Key (wckey).]::[.]size: ' \
+      'workdir[The job''s working directory.]::[.]size: '
+    ;;
+  (squeue-states)
+    _values -s , 'state' \
+      PENDING RUNNING SUSPENDED COMPLETED CANCELLED FAILED TIMEOUT NODE_FAIL PREEMPTED BOOT_FAIL DEADLINE OUT_OF_MEMORY COMPLETING CONFIGURING RESIZING REVOKED SPECIAL_EXIT
+    ;;
+  (sshare-format)
+    _values -s , 'format' $(sshare -e)
+    ;;
+  (sstat-format)
+    _values -s , 'format' $(sstat -e)
+    ;;
+esac
+
